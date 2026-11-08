@@ -1,0 +1,2 @@
+arch:
+ngix-mainline nginx-mainline-mod-geoip nginx-mainline-mod-xslt nginx-mainline-mod-stream nginx-mainline-mod-mail nginx-mainline-mod-image-filter uvicorn python-alembic alembic python-alembic python-sqlalchemy postgresql postgresql-libs postgresql-ip4r python-pgspecial python-psycopg archlinuxcn/python-pygresql python-pycryptodome python-pycryptodome docker cockpit-docker docker-compose docker-machine python-argon2-cffi-bindings argon2 python-argon2-cffi 
