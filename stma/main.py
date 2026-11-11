@@ -11,7 +11,9 @@ from uuid import uuid4
 from Crypto.Cipher import DES
 from Crypto.PublicKey import RSA
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -75,6 +77,11 @@ def create_app(
     app.state.storage_dir = storage_dir
     app.state.max_document_bytes = max_document_bytes
     app.state.session_hours = session_hours
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+    @app.get("/", include_in_schema=False)
+    def login_page() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "static" / "login.html")
 
     def get_db(request: Request):
         with request.app.state.session_factory() as db:

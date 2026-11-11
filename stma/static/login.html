@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>Sign in · STMA</title>
+    <link rel="stylesheet" href="/static/login.css">
+    <script src="/static/login.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <section class="intro" aria-labelledby="product-name">
+        <a class="brand" href="/" aria-label="STMA home">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span>STMA</span>
+        </a>
+        <div class="intro-copy">
+          <p class="eyebrow">SUMMER TRAINING MANAGEMENT</p>
+          <h1 id="product-name">Your training,<br>in one place.</h1>
+          <p class="intro-description">
+            A shared workspace for students and evaluators to stay connected and exchange reports.
+          </p>
+        </div>
+        <p class="intro-footer">A secure workspace for your summer training.</p>
+      </section>
+
+      <section class="sign-in" aria-labelledby="sign-in-title">
+        <div class="form-wrap">
+          <div id="login-view">
+            <p class="eyebrow">WELCOME BACK</p>
+            <h2 id="sign-in-title">Sign in to STMA</h2>
+            <p class="form-description">Use the account provided by your system administrator.</p>
+
+            <form id="login-form">
+              <label for="username">Username</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                autocomplete="username"
+                minlength="3"
+                maxlength="80"
+                required
+                autofocus
+              >
+
+              <div class="password-label">
+                <label for="password">Password</label>
+              </div>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                minlength="12"
+                maxlength="256"
+                required
+              >
+
+              <p id="login-message" class="message" role="alert" hidden></p>
+              <button id="submit-button" class="primary-button" type="submit">
+                <span>Sign in</span>
+                <span aria-hidden="true">→</span>
+              </button>
+            </form>
+
+            <p class="help-note">Need an account? Contact your system administrator.</p>
+          </div>
+
+          <div id="signed-in-view" hidden>
+            <p class="eyebrow">SIGNED IN</p>
+            <h2 id="signed-in-title">Welcome</h2>
+            <p id="account-summary" class="form-description"></p>
+            <p class="message message-success">
+              Your account is authenticated. The workspace features are being built.
+            </p>
+            <button id="logout-button" class="secondary-button" type="button">Sign out</button>
+            <p id="logout-message" class="message" role="alert" hidden></p>
+          </div>
+        </div>
+        <p class="copyright">STMA · Summer Training Management Application</p>
+      </section>
+    </main>
+  </body>
+</html>

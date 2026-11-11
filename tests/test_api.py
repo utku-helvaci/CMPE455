@@ -23,6 +23,12 @@ def test_registration_login_and_relationship_access(tmp_path):
         )
 
     with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "Sign in to STMA" in page.text
+        assert client.get("/static/login.css").status_code == 200
+        assert client.get("/static/login.js").status_code == 200
+
         student = client.post(
             "/api/auth/register",
             json={"username": "student1", "password": "student password long", "role": "student"},

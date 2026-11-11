@@ -4,6 +4,7 @@ Summer Training Management Application: a Python API for student–evaluator cha
 
 ## Current implementation
 
+- A responsive sign-in page is served at `/`. It authenticates existing accounts and shows the signed-in username and role; it does not yet include the chat or document workspace.
 - FastAPI and Uvicorn provide the HTTP API.
 - PostgreSQL is the intended shared database. SQLite is the local-development default.
 - SQLAlchemy manages database records.
@@ -40,7 +41,7 @@ Start the API:
 uvicorn stma.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://localhost:8000/docs` to explore the API. For a two-computer demonstration, set the server host address reachable from the client computers and use a TLS reverse proxy such as Nginx. Do not expose the development server directly to an untrusted network.
+Open `http://localhost:8000/` for the sign-in page or `http://localhost:8000/docs` to explore the API. For a two-computer demonstration, set the server host address reachable from the client computers and use a TLS reverse proxy such as Nginx. Do not expose the development server directly to an untrusted network.
 
 ## Initial workflow
 
@@ -53,7 +54,7 @@ Open `http://localhost:8000/docs` to explore the API. For a two-computer demonst
 7. Participants send and read chat messages at the relationship's `/messages` endpoints. Delivery is confirmed by the API response.
 8. A Sysadmin checks `GET /api/admin/health`.
 
-Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. The project still needs an explicit key-fingerprint verification screen/process, automated rotation reminders, revocation policy, database migrations, and a user interface beyond the API explorer.
+Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. The project still needs an explicit key-fingerprint verification screen/process, automated rotation reminders, revocation policy, database migrations, and a client workspace for chat and documents.
 
 ## Tests
 
