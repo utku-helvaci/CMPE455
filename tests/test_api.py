@@ -28,6 +28,8 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert "Sign in to STMA" in page.text
         assert client.get("/static/login.css").status_code == 200
         assert client.get("/static/login.js").status_code == 200
+        assert client.get("/static/workspace.js").status_code == 200
+        assert client.get("/static/document-crypto.js").status_code == 200
 
         student = client.post(
             "/api/auth/register",
@@ -63,6 +65,8 @@ def test_registration_login_and_relationship_access(tmp_path):
             },
         )
         assert relation.status_code == 201
+        assert relation.json()["student_username"] == "student1"
+        assert relation.json()["evaluator_username"] == "evaluator1"
         relationship_id = relation.json()["id"]
 
         student_login = client.post(
@@ -70,6 +74,9 @@ def test_registration_login_and_relationship_access(tmp_path):
             json={"username": "student1", "password": "student password long"},
         )
         student_headers = {"Authorization": f"Bearer {student_login.json()['access_token']}"}
+        student_relationships = client.get("/api/relationships", headers=student_headers)
+        assert student_relationships.status_code == 200
+        assert student_relationships.json()[0]["evaluator_username"] == "evaluator1"
         evaluator_login = client.post(
             "/api/auth/login",
             json={"username": "evaluator1", "password": "evaluator password long"},
@@ -157,6 +164,11 @@ def test_registration_login_and_relationship_access(tmp_path):
             headers=outsider_headers,
         )
         assert denied.status_code == 404
+        denied_documents = client.get(
+            f"/api/relationships/{relationship_id}/documents",
+            headers=outsider_headers,
+        )
+        assert denied_documents.status_code == 404
 
         admin_cannot_read_chat = client.get(
             f"/api/relationships/{relationship_id}/messages",

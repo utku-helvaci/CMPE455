@@ -208,7 +208,7 @@ def create_app(
         payload: RelationshipCreate,
         user: User = Depends(current_user),
         db: Session = Depends(get_db),
-    ) -> Relationship:
+    ) -> RelationshipView:
         require_role(user, "sysadmin")
         student = db.get(User, payload.student_id)
         evaluator = db.get(User, payload.evaluator_id)
@@ -225,25 +225,40 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="This relationship already exists."
             ) from exc
-        db.refresh(relationship)
-        return relationship
+        return RelationshipView(
+            id=relationship.id,
+            student_id=student.id,
+            evaluator_id=evaluator.id,
+            student_username=student.username,
+            evaluator_username=evaluator.username,
+        )
 
     @app.get("/api/relationships", response_model=list[RelationshipView])
     def list_relationships(
         user: User = Depends(current_user),
         db: Session = Depends(get_db),
-    ) -> list[Relationship]:
+    ) -> list[RelationshipView]:
         if user.role == "sysadmin":
             raise HTTPException(
                 status_code=403, detail="Sysadmins do not access client workspaces."
             )
-        return list(
+        relationships = list(
             db.scalars(
                 select(Relationship).where(
                     (Relationship.student_id == user.id) | (Relationship.evaluator_id == user.id)
                 )
             )
         )
+        return [
+            RelationshipView(
+                id=relationship.id,
+                student_id=relationship.student_id,
+                evaluator_id=relationship.evaluator_id,
+                student_username=relationship.student.username,
+                evaluator_username=relationship.evaluator.username,
+            )
+            for relationship in relationships
+        ]
 
     @app.post(
         "/api/relationships/{relationship_id}/keys", response_model=PublicKeyView, status_code=201

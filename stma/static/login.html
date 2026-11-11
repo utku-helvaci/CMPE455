@@ -68,19 +68,142 @@
             <p class="help-note">Need an account? Contact your system administrator.</p>
           </div>
 
-          <div id="signed-in-view" hidden>
-            <p class="eyebrow">SIGNED IN</p>
-            <h2 id="signed-in-title">Welcome</h2>
-            <p id="account-summary" class="form-description"></p>
-            <p class="message message-success">
-              Your account is authenticated. The workspace features are being built.
-            </p>
-            <button id="logout-button" class="secondary-button" type="button">Sign out</button>
-            <p id="logout-message" class="message" role="alert" hidden></p>
-          </div>
         </div>
         <p class="copyright">STMA · Summer Training Management Application</p>
       </section>
     </main>
+
+    <section id="workspace" class="workspace-app" aria-label="STMA workspace" hidden>
+      <header class="workspace-header">
+        <a class="workspace-brand" href="/" aria-label="STMA home">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span>STMA</span>
+        </a>
+        <div class="workspace-account">
+          <span id="workspace-account-name" class="account-name"></span>
+          <span id="workspace-account-role" class="role-pill"></span>
+          <button id="logout-button" class="header-button" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <div id="client-workspace" class="workspace-layout" hidden>
+        <aside class="relationship-sidebar">
+          <div class="sidebar-heading">
+            <p class="eyebrow">YOUR WORKSPACE</p>
+            <h1>Conversations</h1>
+          </div>
+          <div id="relationship-list" class="relationship-list"></div>
+          <p class="sidebar-footnote">Only your assigned training relationships are shown.</p>
+        </aside>
+
+        <section class="conversation-area" aria-label="Training workspace">
+          <div id="workspace-empty" class="workspace-empty">
+            <span class="empty-icon" aria-hidden="true">✦</span>
+            <h2 id="empty-title">Your workspace is ready</h2>
+            <p id="empty-description">Choose a conversation to view messages and shared reports.</p>
+          </div>
+
+          <div id="relationship-workspace" class="relationship-workspace" hidden>
+            <header class="conversation-header">
+              <div>
+                <p id="counterpart-role" class="eyebrow"></p>
+                <h2 id="counterpart-name"></h2>
+              </div>
+              <div class="connection-status"><span aria-hidden="true"></span> Connected</div>
+            </header>
+
+            <nav class="workspace-tabs" role="tablist" aria-label="Workspace sections">
+              <button class="workspace-tab active" id="chat-tab" role="tab" aria-selected="true" aria-controls="chat-panel" data-panel="chat-panel" type="button">Messages</button>
+              <button class="workspace-tab" id="documents-tab" role="tab" aria-selected="false" aria-controls="documents-panel" data-panel="documents-panel" type="button">
+                Documents <span id="document-count" class="tab-count">0</span>
+              </button>
+              <button class="workspace-tab" id="keys-tab" role="tab" aria-selected="false" aria-controls="keys-panel" data-panel="keys-panel" type="button">Security keys</button>
+            </nav>
+
+            <section id="chat-panel" class="workspace-panel chat-panel" role="tabpanel" aria-labelledby="chat-tab">
+              <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+              <p id="chat-message" class="inline-message" role="alert" hidden></p>
+              <form id="chat-form" class="chat-form">
+                <label class="sr-only" for="chat-input">Write a message</label>
+                <textarea
+                  id="chat-input"
+                  name="body"
+                  rows="1"
+                  maxlength="4000"
+                  placeholder="Write a message…"
+                  required
+                ></textarea>
+                <button id="send-button" class="send-button" type="submit" aria-label="Send message">
+                  <span>Send</span><span aria-hidden="true">↗</span>
+                </button>
+              </form>
+              <p class="chat-note">Messages are stored by the server and protected in transit by HTTPS.</p>
+            </section>
+
+            <section id="documents-panel" class="workspace-panel documents-panel" role="tabpanel" aria-labelledby="documents-tab" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">REPORT EXCHANGE</p>
+                  <h3>Shared documents</h3>
+                </div>
+                <button id="upload-document-button" class="primary-button compact-button" type="button">
+                  <span aria-hidden="true">＋</span><span>Send a report</span>
+                </button>
+                <input id="document-file" type="file" hidden>
+              </div>
+              <p class="security-note">
+                Reports are signed and DES-encrypted in your browser before upload. Private keys stay on your device.
+              </p>
+              <p id="document-message" class="inline-message" role="alert" hidden></p>
+              <div id="document-list" class="document-list"></div>
+            </section>
+
+            <section id="keys-panel" class="workspace-panel keys-panel" role="tabpanel" aria-labelledby="keys-tab" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">LOCAL KEY MANAGEMENT</p>
+                  <h3>Security keys</h3>
+                </div>
+                <button id="generate-keys-button" class="primary-button compact-button" type="button">
+                  <span>Generate keys</span>
+                </button>
+              </div>
+              <p class="security-note">
+                Private keys are generated and kept in this browser, then downloaded to your computer. Never share them.
+                Verify your partner’s public-key fingerprint with them directly.
+              </p>
+              <p id="key-message" class="inline-message" role="status" hidden></p>
+              <div id="key-list" class="key-list"></div>
+              <div class="private-key-controls">
+                <p class="private-key-warning">
+                  Keep private keys only on this device. These PEM files are not password-encrypted; protect local
+                  access, keep secure backups, and do not put them in shared folders.
+                </p>
+                <label for="signing-private-key">Your signing private key</label>
+                <input id="signing-private-key" type="file" accept=".pem,.key">
+                <label for="encryption-private-key">Your decryption private key</label>
+                <input id="encryption-private-key" type="file" accept=".pem,.key">
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <section id="admin-workspace" class="admin-workspace" hidden>
+        <div class="admin-card">
+          <p class="eyebrow">SERVER MONITORING</p>
+          <h1>System health</h1>
+          <p class="admin-description">
+            Operational totals only. This dashboard does not display client conversations or document contents.
+          </p>
+          <p id="health-message" class="inline-message" role="alert" hidden></p>
+          <div id="health-stats" class="health-stats"></div>
+          <button id="refresh-health" class="secondary-button" type="button">Refresh status</button>
+        </div>
+      </section>
+      <p id="logout-message" class="workspace-toast" role="alert" hidden></p>
+    </section>
+
+    <script src="/static/workspace.js" defer></script>
   </body>
 </html>

@@ -4,7 +4,7 @@ Summer Training Management Application: a Python API for student–evaluator cha
 
 ## Current implementation
 
-- A responsive sign-in page is served at `/`. It authenticates existing accounts and shows the signed-in username and role; it does not yet include the chat or document workspace.
+- A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
 - FastAPI and Uvicorn provide the HTTP API.
 - PostgreSQL is the intended shared database. SQLite is the local-development default.
 - SQLAlchemy manages database records.
@@ -12,7 +12,7 @@ Summer Training Management Application: a Python API for student–evaluator cha
 - Client-side document processing uses RSA-PSS/SHA-256 signatures, DES-CBC with PKCS#7 padding, and RSA-OAEP/SHA-256 to protect the DES key. There is no HMAC or second document cipher.
 - The recipient verifies the signature after decryption. A failed decryption or signature check is an error, not a successful receipt.
 - Clients can generate 3072-bit RSA key pairs with `stma.crypto.generate_rsa_key_pair()`. Publish only the public key, keep private keys on the client computer, and restrict local access to their files.
-- Chat is sent over HTTPS/WSS when deployed behind TLS. This initial version stores chat text in PostgreSQL, so it is not end-to-end encrypted.
+- Chat is sent over HTTPS when deployed behind TLS and the workspace refreshes messages every three seconds. Messages are stored as plaintext in PostgreSQL, so they are not end-to-end encrypted.
 - Sysadmin health endpoints expose service counts, not chat or document contents. Database administrators can still access database records; restrict database credentials accordingly.
 
 DES is used because the course assignment requires it. DES has a short effective key and is not appropriate for real sensitive documents.
@@ -41,7 +41,9 @@ Start the API:
 uvicorn stma.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://localhost:8000/` for the sign-in page or `http://localhost:8000/docs` to explore the API. For a two-computer demonstration, set the server host address reachable from the client computers and use a TLS reverse proxy such as Nginx. Do not expose the development server directly to an untrusted network.
+Open `http://localhost:8000/` for the sign-in page and workspace, or `http://localhost:8000/docs` to explore the API. The page uses browser Web Crypto for 3072-bit RSA-PSS signatures and RSA-OAEP key wrapping, and a local JavaScript DES-CBC implementation for documents. RSA private keys are generated in the browser and downloaded only when the user clicks the provided download links. The browser keeps them in memory only for the current tab; the server receives only public keys. Downloaded private-key PEM files are not password-encrypted, so protect them with your device's access controls and keep secure backups. Verify the first client key out-of-band with its partner. Never use untrusted client devices for private keys.
+
+For a two-computer demonstration, set the server host address reachable from the client computers and use a TLS reverse proxy such as Nginx. Do not expose the development server directly to an untrusted network.
 
 ## Initial workflow
 
@@ -54,7 +56,7 @@ Open `http://localhost:8000/` for the sign-in page or `http://localhost:8000/doc
 7. Participants send and read chat messages at the relationship's `/messages` endpoints. Delivery is confirmed by the API response.
 8. A Sysadmin checks `GET /api/admin/health`.
 
-Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. The project still needs an explicit key-fingerprint verification screen/process, automated rotation reminders, revocation policy, database migrations, and a client workspace for chat and documents.
+The workspace provides SHA-256 public-key fingerprints for users to compare through a trusted channel. Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. Key backup and compromise/revocation procedures remain manual.
 
 ## Tests
 

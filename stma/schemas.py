@@ -39,6 +39,8 @@ class RelationshipView(BaseModel):
     id: str
     student_id: str
     evaluator_id: str
+    student_username: str
+    evaluator_username: str
 
 
 class PublicKeyCreate(BaseModel):
