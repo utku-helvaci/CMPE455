@@ -713,42 +713,38 @@ async function refreshAdminUsers() {
       identity.append(name, schoolId);
       row.append(identity);
 
-      if (account.role === "pending") {
-        const roleSelect = document.createElement("select");
-        roleSelect.setAttribute("aria-label", `Role for ${name.textContent}`);
-        roleSelect.innerHTML =
-          '<option value="">Select role</option><option value="student">Student</option><option value="evaluator">Teacher / evaluator</option>';
-        const assignButton = document.createElement("button");
-        assignButton.type = "button";
-        assignButton.className = "secondary-button";
-        assignButton.textContent = "Assign role";
-        assignButton.addEventListener("click", async () => {
-          if (!roleSelect.value) {
-            showInlineMessage("admin-users-message", "Select a role before assigning it.");
-            return;
-          }
-          assignButton.disabled = true;
-          hideInlineMessage("admin-users-message");
-          try {
-            await api(`/api/admin/users/${account.id}/role`, {
-              method: "PATCH",
-              body: JSON.stringify({ role: roleSelect.value }),
-            });
-            await refreshAdminUsers();
-          } catch (error) {
-            showInlineMessage("admin-users-message", error.message);
-          } finally {
-            assignButton.disabled = false;
-          }
-        });
-        row.append(roleSelect, assignButton);
-      } else {
-        const roleLabel = document.createElement("span");
-        roleLabel.className = "admin-user-role";
-        roleLabel.textContent =
-          account.role === "evaluator" ? "Teacher / evaluator" : "Student";
-        row.append(roleLabel);
-      }
+      const roleSelect = document.createElement("select");
+      roleSelect.setAttribute("aria-label", `Role for ${name.textContent}`);
+      roleSelect.innerHTML =
+        '<option value="">Select role</option><option value="student">Student</option><option value="evaluator">Teacher / evaluator</option>';
+      roleSelect.value = ["student", "evaluator"].includes(account.role) ? account.role : "";
+      const assignButton = document.createElement("button");
+      assignButton.type = "button";
+      assignButton.className = "secondary-button";
+      assignButton.textContent = account.role === "pending" ? "Assign role" : "Save role";
+      assignButton.disabled = account.role === roleSelect.value;
+      roleSelect.addEventListener("change", () => {
+        assignButton.disabled = !roleSelect.value || account.role === roleSelect.value;
+      });
+      assignButton.addEventListener("click", async () => {
+        if (!roleSelect.value) {
+          showInlineMessage("admin-users-message", "Select a role before assigning it.");
+          return;
+        }
+        assignButton.disabled = true;
+        hideInlineMessage("admin-users-message");
+        try {
+          await api(`/api/admin/users/${account.id}/role`, {
+            method: "PATCH",
+            body: JSON.stringify({ role: roleSelect.value }),
+          });
+          await refreshAdminUsers();
+        } catch (error) {
+          showInlineMessage("admin-users-message", error.message);
+          assignButton.disabled = false;
+        }
+      });
+      row.append(roleSelect, assignButton);
       list.append(row);
     }
   } catch (error) {

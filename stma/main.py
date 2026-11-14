@@ -237,10 +237,25 @@ def create_app(
         target = db.get(User, user_id)
         if target is None or target.role == "sysadmin":
             raise HTTPException(status_code=404, detail="Account not found.")
-        if target.role != "pending":
+        if target.role != payload.role and target.role != "pending":
+            active_relationship = db.scalar(
+                select(Relationship.id)
+                .where(
+                    Relationship.active.is_(True),
+                    (Relationship.student_id == target.id)
+                    | (Relationship.evaluator_id == target.id),
+                )
+                .limit(1)
+            )
+            if active_relationship is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This account is in an active relationship. End the relationship before changing its role.",
+                )
+        if target.role == payload.role:
             raise HTTPException(
                 status_code=409,
-                detail="A role has already been assigned to this account.",
+                detail="This account already has the selected role.",
             )
         target.role = payload.role
         db.commit()

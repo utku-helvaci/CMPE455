@@ -51,7 +51,7 @@ For a two-computer demonstration, set the server host address reachable from the
 ## Initial workflow
 
 1. Students and teachers register at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration.
-2. A Sysadmin signs in, opens **Assign account roles**, and assigns each pending account as a student or teacher/evaluator. Assigned roles cannot be changed from the admin workspace.
+2. A Sysadmin signs in, opens **Assign account roles**, and assigns or updates each account as a student or teacher/evaluator. Role changes are blocked while an account has an active student–teacher relationship.
 3. Students and teachers log in at `/` with their school ID and password after role assignment. Sysadmins use their provisioned username.
 4. Teachers enter a student's exact school ID in the workspace to add the relationship. Sysadmins can also create relationships using `POST /api/admin/relationships`.
 5. Each participant generates separate signing and encryption RSA key pairs locally and publishes the public keys to `POST /api/relationships/{id}/keys`. Verify key fingerprints out of band before relying on them.

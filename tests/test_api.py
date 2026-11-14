@@ -128,12 +128,19 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert assigned_student.json()["role"] == assigned_outsider.json()["role"] == "student"
         assert assigned_evaluator.status_code == 200
         assert assigned_evaluator.json()["role"] == "evaluator"
-        reassignment = client.patch(
-            f"/api/admin/users/{student.json()['id']}/role",
+        role_change = client.patch(
+            f"/api/admin/users/{outsider.json()['id']}/role",
             headers=admin_headers,
             json={"role": "evaluator"},
         )
-        assert reassignment.status_code == 409
+        assert role_change.status_code == 200
+        assert role_change.json()["role"] == "evaluator"
+        same_role = client.patch(
+            f"/api/admin/users/{student.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "student"},
+        )
+        assert same_role.status_code == 409
 
         evaluator_login = client.post(
             "/api/auth/login",
@@ -179,6 +186,13 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert relation.json()["evaluator_username"] == "teacher123"
         assert relation.json()["evaluator_name"] == "Terry Teacher"
         relationship_id = relation.json()["id"]
+        role_change_with_relationship = client.patch(
+            f"/api/admin/users/{student.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "evaluator"},
+        )
+        assert role_change_with_relationship.status_code == 409
+        assert "active relationship" in role_change_with_relationship.json()["detail"]
         duplicate_relationship = client.post(
             "/api/relationships",
             headers=evaluator_headers,
