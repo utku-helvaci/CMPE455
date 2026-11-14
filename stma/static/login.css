@@ -1092,7 +1092,9 @@ button:disabled {
 .admin-workspace {
   display: grid;
   flex: 1;
-  place-items: center;
+  min-height: 0;
+  overflow-y: auto;
+  place-items: start center;
   padding: 28px;
 }
 
@@ -1154,6 +1156,12 @@ button:disabled {
 }
 
 .admin-accounts {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.admin-health {
   margin-top: 40px;
   padding-top: 28px;
   border-top: 1px solid #e6ebf2;

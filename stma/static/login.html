@@ -282,14 +282,6 @@
 
       <section id="admin-workspace" class="admin-workspace" hidden>
         <div class="admin-card">
-          <p class="eyebrow">SERVER MONITORING</p>
-          <h1>System health</h1>
-          <p class="admin-description">
-            Operational totals only. This dashboard does not display client conversations or document contents.
-          </p>
-          <p id="health-message" class="inline-message" role="alert" hidden></p>
-          <div id="health-stats" class="health-stats"></div>
-          <button id="refresh-health" class="secondary-button" type="button">Refresh status</button>
           <section class="admin-accounts" aria-labelledby="accounts-heading">
             <div class="admin-section-heading">
               <div>
@@ -303,6 +295,16 @@
             </p>
             <p id="admin-users-message" class="inline-message" role="alert" hidden></p>
             <div id="admin-user-list" class="admin-user-list"></div>
+          </section>
+          <section class="admin-health" aria-labelledby="health-heading">
+            <p class="eyebrow">SERVER MONITORING</p>
+            <h1 id="health-heading">System health</h1>
+            <p class="admin-description">
+              Operational totals only. This dashboard does not display client conversations or document contents.
+            </p>
+            <p id="health-message" class="inline-message" role="alert" hidden></p>
+            <div id="health-stats" class="health-stats"></div>
+            <button id="refresh-health" class="secondary-button" type="button">Refresh status</button>
           </section>
         </div>
       </section>
