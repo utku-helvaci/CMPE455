@@ -8,6 +8,7 @@ const signupMessage = document.querySelector("#signup-message");
 let accessToken = null;
 
 function showMessage(element, message) {
+  element.classList.remove("message-success");
   element.textContent = message;
   element.hidden = false;
 }
@@ -35,7 +36,10 @@ async function signIn(username, password) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(typeof error?.detail === "string" ? error.detail : "Unable to sign in.");
+    const message = typeof error?.detail === "string" ? error.detail : "Unable to sign in.";
+    const failure = new Error(message);
+    failure.status = response.status;
+    throw failure;
   }
 
   const result = await response.json();
@@ -81,8 +85,6 @@ signupForm.addEventListener("submit", async (event) => {
   submitButton.disabled = true;
   const formData = new FormData(signupForm);
   const username = formData.get("school_id");
-  const password = formData.get("password");
-  const role = formData.get("role");
 
   try {
     const response = await fetch("/api/auth/register", {
@@ -92,8 +94,7 @@ signupForm.addEventListener("submit", async (event) => {
         first_name: formData.get("first_name"),
         last_name: formData.get("last_name"),
         school_id: username,
-        password,
-        role,
+        password: formData.get("password"),
       }),
     });
     if (!response.ok) {
@@ -101,11 +102,13 @@ signupForm.addEventListener("submit", async (event) => {
       throw new Error(typeof error?.detail === "string" ? error.detail : "Could not create account.");
     }
 
-    await signIn(username, password);
-    signupView.hidden = true;
+    showMessage(
+      signupMessage,
+      "Account created. A Sysadmin must assign your role before you can sign in.",
+    );
+    signupMessage.classList.add("message-success");
+    signupForm.reset();
   } catch (error) {
-    if (accessToken && window.stopWorkspace) await window.stopWorkspace();
-    accessToken = null;
     showMessage(
       signupMessage,
       error instanceof TypeError
@@ -119,7 +122,3 @@ signupForm.addEventListener("submit", async (event) => {
 
 document.querySelector("#show-signup").addEventListener("click", showSignup);
 document.querySelector("#show-login").addEventListener("click", showLogin);
-document.querySelector("#account-role").addEventListener("change", (event) => {
-  document.querySelector("#signup-button-label").textContent =
-    event.target.value === "evaluator" ? "Create teacher account" : "Create student account";
-});

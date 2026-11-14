@@ -30,6 +30,8 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert client.get("/static/workspace.js").status_code == 200
         assert client.get("/static/document-crypto.js").status_code == 200
         assert 'id="signup-form"' in page.text
+        assert "Assign account roles" in page.text
+        assert 'id="account-role"' not in page.text
 
         student = client.post(
             "/api/auth/register",
@@ -50,10 +52,21 @@ def test_registration_login_and_relationship_access(tmp_path):
             },
         )
         assert student.status_code == outsider.status_code == 201
-        assert student.json()["role"] == "student"
+        assert student.json()["role"] == "pending"
         assert student.json()["first_name"] == "Stu"
         assert student.json()["last_name"] == "Dent"
         assert student.json()["school_id"] == "student1"
+        self_assigned_role = client.post(
+            "/api/auth/register",
+            json={
+                "first_name": "Self",
+                "last_name": "Assigned",
+                "school_id": "selfassigned",
+                "password": "another student password",
+                "role": "evaluator",
+            },
+        )
+        assert self_assigned_role.status_code == 422
         duplicate_school_id = client.post(
             "/api/auth/register",
             json={
@@ -71,11 +84,10 @@ def test_registration_login_and_relationship_access(tmp_path):
                 "last_name": "Teacher",
                 "school_id": "teacher123",
                 "password": "teacher password long",
-                "role": "evaluator",
             },
         )
         assert evaluator.status_code == 201
-        assert evaluator.json()["role"] == "evaluator"
+        assert evaluator.json()["role"] == "pending"
         assert evaluator.json()["school_id"] == "teacher123"
 
         admin_login = client.post(
@@ -84,6 +96,44 @@ def test_registration_login_and_relationship_access(tmp_path):
         )
         assert admin_login.status_code == 200
         admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        pending_login = client.post(
+            "/api/auth/login",
+            json={"username": "student1", "password": "student password long"},
+        )
+        assert pending_login.status_code == 403
+        assert "awaiting role assignment" in pending_login.json()["detail"]
+        pending_accounts = client.get("/api/admin/users", headers=admin_headers)
+        assert pending_accounts.status_code == 200
+        assert len(pending_accounts.json()) == 3
+        assert {account["role"] for account in pending_accounts.json()} == {"pending"}
+        assert all(account["username"] != "sysadmin" for account in pending_accounts.json())
+
+        assigned_student = client.patch(
+            f"/api/admin/users/{student.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "student"},
+        )
+        assigned_evaluator = client.patch(
+            f"/api/admin/users/{evaluator.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "evaluator"},
+        )
+        assigned_outsider = client.patch(
+            f"/api/admin/users/{outsider.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "student"},
+        )
+        assert assigned_student.status_code == assigned_outsider.status_code == 200
+        assert assigned_student.json()["role"] == assigned_outsider.json()["role"] == "student"
+        assert assigned_evaluator.status_code == 200
+        assert assigned_evaluator.json()["role"] == "evaluator"
+        reassignment = client.patch(
+            f"/api/admin/users/{student.json()['id']}/role",
+            headers=admin_headers,
+            json={"role": "evaluator"},
+        )
+        assert reassignment.status_code == 409
 
         evaluator_login = client.post(
             "/api/auth/login",
@@ -98,6 +148,14 @@ def test_registration_login_and_relationship_access(tmp_path):
             json={"username": "student1", "password": "student password long"},
         )
         student_headers = {"Authorization": f"Bearer {student_login.json()['access_token']}"}
+        denied_account_list = client.get("/api/admin/users", headers=student_headers)
+        assert denied_account_list.status_code == 403
+        denied_role_assignment = client.patch(
+            f"/api/admin/users/{outsider.json()['id']}/role",
+            headers=student_headers,
+            json={"role": "evaluator"},
+        )
+        assert denied_role_assignment.status_code == 403
         student_cannot_choose_teacher = client.post(
             "/api/relationships",
             headers=student_headers,

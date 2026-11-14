@@ -1097,7 +1097,7 @@ button:disabled {
 }
 
 .admin-card {
-  width: min(100%, 720px);
+  width: min(100%, 960px);
   padding: clamp(24px, 5vw, 48px);
   border: 1px solid #e4e9f0;
   border-radius: 14px;
@@ -1151,6 +1151,88 @@ button:disabled {
   min-height: 38px;
   padding: 0 13px;
   font-size: 11px;
+}
+
+.admin-accounts {
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid #e6ebf2;
+}
+
+.admin-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-section-heading h2 {
+  margin: 0;
+  color: #213047;
+  font-size: 19px;
+}
+
+.admin-section-heading .eyebrow {
+  margin-bottom: 7px;
+}
+
+.admin-accounts .admin-description {
+  margin: 12px 0 18px;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e6ebf2;
+  border-radius: 9px;
+  background: #fbfcfe;
+}
+
+.admin-user-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-user-identity strong {
+  overflow: hidden;
+  color: #27364d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-identity span,
+.admin-user-role,
+.admin-users-empty {
+  color: #78859a;
+  font-size: 11px;
+}
+
+.admin-user-row select {
+  width: 100%;
+  min-height: 38px;
+  margin: 0;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.admin-user-row .secondary-button {
+  white-space: nowrap;
+}
+
+.admin-users-empty {
+  margin: 0;
+  padding: 18px 12px;
+  text-align: center;
 }
 
 .workspace-toast {
@@ -1275,6 +1357,23 @@ button:disabled {
 }
 
 @media (max-width: 420px) {
+  .admin-workspace {
+    padding: 14px;
+  }
+
+  .admin-user-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .admin-user-identity {
+    grid-column: 1 / -1;
+  }
+
+  .admin-user-row select,
+  .admin-user-row .secondary-button {
+    grid-column: auto;
+  }
+
   .account-name {
     max-width: 90px;
     overflow: hidden;

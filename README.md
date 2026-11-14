@@ -5,7 +5,7 @@ Summer Training Management Application: a Python API for student–evaluator cha
 ## Current implementation
 
 - A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
-- Students and teachers can self-register with their name, surname, school ID, password, and role. Their unique school ID is also their login name. Sysadmins can use a separate username without a school ID.
+- Students and teachers can register with their name, surname, school ID, and password. New accounts remain pending until a Sysadmin assigns the student or evaluator role from the admin workspace; pending users cannot sign in. Existing account roles are preserved. Student and evaluator school IDs are also their login names; Sysadmins can use a separate username.
 - Teachers add students by entering the exact school ID, without browsing a directory. Teachers can end a relationship; this removes active access but retains the old messages and encrypted files. Re-adding the same student restores that relationship and its history.
 - Existing SQLite databases are updated at startup to add the new student profile columns; existing accounts remain in place.
 - FastAPI and Uvicorn provide the HTTP API.
@@ -50,14 +50,15 @@ For a two-computer demonstration, set the server host address reachable from the
 
 ## Initial workflow
 
-1. Students and teachers sign up at `/` with name, surname, school ID, role, and a password of at least 12 characters. No keys or key files are needed during registration.
-2. Students and teachers log in at `/` with their school ID and password. Sysadmins use their provisioned username.
-3. Teachers enter a student's exact school ID in the workspace to add the relationship. Sysadmins can also create relationships using `POST /api/admin/relationships`.
-4. Each participant generates separate signing and encryption RSA key pairs locally and publishes the public keys to `POST /api/relationships/{id}/keys`. Verify key fingerprints out of band before relying on them.
-5. The sender signs and encrypts the report locally, wraps the DES key for the recipient, then sends the ciphertext and key references to `POST /api/relationships/{id}/documents`.
-6. The recipient downloads the encrypted package from `GET /api/relationships/{id}/documents`, unwraps the DES key locally, decrypts the report, and verifies its signature with the sender's signing public key.
-7. Participants send and read chat messages at the relationship's `/messages` endpoints. Delivery is confirmed by the API response.
-8. A Sysadmin checks `GET /api/admin/health`.
+1. Students and teachers register at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration.
+2. A Sysadmin signs in, opens **Assign account roles**, and assigns each pending account as a student or teacher/evaluator. Assigned roles cannot be changed from the admin workspace.
+3. Students and teachers log in at `/` with their school ID and password after role assignment. Sysadmins use their provisioned username.
+4. Teachers enter a student's exact school ID in the workspace to add the relationship. Sysadmins can also create relationships using `POST /api/admin/relationships`.
+5. Each participant generates separate signing and encryption RSA key pairs locally and publishes the public keys to `POST /api/relationships/{id}/keys`. Verify key fingerprints out of band before relying on them.
+6. The sender signs and encrypts the report locally, wraps the DES key for the recipient, then sends the ciphertext and key references to `POST /api/relationships/{id}/documents`.
+7. The recipient downloads the encrypted package from `GET /api/relationships/{id}/documents`, unwraps the DES key locally, decrypts the report, and verifies its signature with the sender's signing public key.
+8. Participants send and read chat messages at the relationship's `/messages` endpoints. Delivery is confirmed by the API response.
+9. A Sysadmin checks `GET /api/admin/health`.
 
 The workspace provides SHA-256 public-key fingerprints for users to compare through a trusted channel. Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. Key backup and compromise/revocation procedures remain manual.
 

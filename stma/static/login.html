@@ -72,9 +72,9 @@
           </div>
 
           <div id="signup-view" hidden>
-            <p class="eyebrow">STUDENT ACCOUNT</p>
+            <p class="eyebrow">NEW ACCOUNT</p>
             <h2 id="signup-title">Create your account</h2>
-            <p class="form-description">Register with your student details to join STMA.</p>
+            <p class="form-description">Register with your school details. A Sysadmin will assign your account role before you can sign in.</p>
 
             <form id="signup-form">
               <div class="name-fields">
@@ -124,11 +124,6 @@
                 required
               >
               <p class="password-hint">Use at least 12 characters.</p>
-              <label for="account-role">I am a</label>
-              <select id="account-role" name="role" required>
-                <option value="student">Student</option>
-                <option value="evaluator">Teacher / evaluator</option>
-              </select>
               <p class="signup-security-note">
                 You do not need to upload any key files to sign up. Private keys are created later and must never be shared.
               </p>
@@ -295,6 +290,20 @@
           <p id="health-message" class="inline-message" role="alert" hidden></p>
           <div id="health-stats" class="health-stats"></div>
           <button id="refresh-health" class="secondary-button" type="button">Refresh status</button>
+          <section class="admin-accounts" aria-labelledby="accounts-heading">
+            <div class="admin-section-heading">
+              <div>
+                <p class="eyebrow">ACCOUNT MANAGEMENT</p>
+                <h2 id="accounts-heading">Assign account roles</h2>
+              </div>
+              <button id="refresh-admin-users" class="secondary-button" type="button">Refresh accounts</button>
+            </div>
+            <p class="admin-description">
+              New registrations appear as pending. Assign each account as a student or teacher/evaluator before they can sign in. Assigned roles cannot be changed here.
+            </p>
+            <p id="admin-users-message" class="inline-message" role="alert" hidden></p>
+            <div id="admin-user-list" class="admin-user-list"></div>
+          </section>
         </div>
       </section>
       <p id="logout-message" class="workspace-toast" role="alert" hidden></p>

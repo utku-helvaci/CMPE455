@@ -31,6 +31,7 @@ from stma.schemas import (
     Registration,
     RelationshipCreate,
     RelationshipView,
+    RoleAssignment,
     StudentSelection,
     TokenView,
     UserCreate,
@@ -137,7 +138,7 @@ def create_app(
         user = User(
             username=payload.school_id.strip(),
             password_hash=hash_password(payload.password),
-            role=payload.role,
+            role="pending",
             first_name=payload.first_name.strip(),
             last_name=payload.last_name.strip(),
             school_id=payload.school_id.strip(),
@@ -156,6 +157,11 @@ def create_app(
         user = db.scalar(select(User).where(User.username == payload.username))
         if user is None or not verify_password(user.password_hash, payload.password):
             raise HTTPException(status_code=401, detail="Invalid username or password.")
+        if user.role == "pending":
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is awaiting role assignment by a Sysadmin.",
+            )
         token, digest = issue_session_token()
         db.add(
             LoginSession(
@@ -205,6 +211,41 @@ def create_app(
             raise HTTPException(status_code=409, detail="School ID is already registered.") from exc
         db.refresh(new_user)
         return new_user
+
+    @app.get("/api/admin/users", response_model=list[UserView])
+    def list_admin_users(
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> list[User]:
+        require_role(user, "sysadmin")
+        return list(
+            db.scalars(
+                select(User)
+                .where(User.role != "sysadmin")
+                .order_by(User.role != "pending", User.created_at.desc())
+            )
+        )
+
+    @app.patch("/api/admin/users/{user_id}/role", response_model=UserView)
+    def assign_user_role(
+        user_id: str,
+        payload: RoleAssignment,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        require_role(user, "sysadmin")
+        target = db.get(User, user_id)
+        if target is None or target.role == "sysadmin":
+            raise HTTPException(status_code=404, detail="Account not found.")
+        if target.role != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail="A role has already been assigned to this account.",
+            )
+        target.role = payload.role
+        db.commit()
+        db.refresh(target)
+        return target
 
     @app.post(
         "/api/admin/relationships",

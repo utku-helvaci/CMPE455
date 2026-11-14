@@ -194,7 +194,7 @@ async function startWorkspace(token, user) {
     addStudentForm.hidden = true;
     clientWorkspace.hidden = true;
     adminWorkspace.hidden = false;
-    await refreshHealth();
+    await Promise.all([refreshHealth(), refreshAdminUsers()]);
     return;
   }
 
@@ -684,6 +684,80 @@ async function refreshHealth() {
   }
 }
 
+async function refreshAdminUsers() {
+  const button = document.querySelector("#refresh-admin-users");
+  button.disabled = true;
+  hideInlineMessage("admin-users-message");
+  try {
+    const users = await api("/api/admin/users");
+    const list = document.querySelector("#admin-user-list");
+    list.replaceChildren();
+    if (users.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "admin-users-empty";
+      empty.textContent = "No student or evaluator accounts have registered yet.";
+      list.append(empty);
+      return;
+    }
+
+    for (const account of users) {
+      const row = document.createElement("div");
+      row.className = "admin-user-row";
+      const identity = document.createElement("div");
+      identity.className = "admin-user-identity";
+      const name = document.createElement("strong");
+      name.textContent =
+        [account.first_name, account.last_name].filter(Boolean).join(" ") || account.username;
+      const schoolId = document.createElement("span");
+      schoolId.textContent = account.school_id || account.username;
+      identity.append(name, schoolId);
+      row.append(identity);
+
+      if (account.role === "pending") {
+        const roleSelect = document.createElement("select");
+        roleSelect.setAttribute("aria-label", `Role for ${name.textContent}`);
+        roleSelect.innerHTML =
+          '<option value="">Select role</option><option value="student">Student</option><option value="evaluator">Teacher / evaluator</option>';
+        const assignButton = document.createElement("button");
+        assignButton.type = "button";
+        assignButton.className = "secondary-button";
+        assignButton.textContent = "Assign role";
+        assignButton.addEventListener("click", async () => {
+          if (!roleSelect.value) {
+            showInlineMessage("admin-users-message", "Select a role before assigning it.");
+            return;
+          }
+          assignButton.disabled = true;
+          hideInlineMessage("admin-users-message");
+          try {
+            await api(`/api/admin/users/${account.id}/role`, {
+              method: "PATCH",
+              body: JSON.stringify({ role: roleSelect.value }),
+            });
+            await refreshAdminUsers();
+          } catch (error) {
+            showInlineMessage("admin-users-message", error.message);
+          } finally {
+            assignButton.disabled = false;
+          }
+        });
+        row.append(roleSelect, assignButton);
+      } else {
+        const roleLabel = document.createElement("span");
+        roleLabel.className = "admin-user-role";
+        roleLabel.textContent =
+          account.role === "evaluator" ? "Teacher / evaluator" : "Student";
+        row.append(roleLabel);
+      }
+      list.append(row);
+    }
+  } catch (error) {
+    showInlineMessage("admin-users-message", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 for (const tab of document.querySelectorAll(".workspace-tab")) {
   tab.addEventListener("click", () => setActivePanel(tab.dataset.panel));
 }
@@ -720,6 +794,7 @@ documentInput.addEventListener("change", () => {
 
 document.querySelector("#generate-keys-button").addEventListener("click", generateAndPublishKeys);
 document.querySelector("#refresh-health").addEventListener("click", refreshHealth);
+document.querySelector("#refresh-admin-users").addEventListener("click", refreshAdminUsers);
 
 addStudentForm.addEventListener("submit", async (event) => {
   event.preventDefault();
