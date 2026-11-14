@@ -9,12 +9,23 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12, max_length=256)
 
 
-class Registration(Credentials):
-    role: Literal["student", "evaluator"]
+class Registration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
+    last_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
+    school_id: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=12, max_length=256)
 
 
-class UserCreate(Credentials):
-    role: Literal["student", "evaluator"]
+class UserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
+    last_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
+    school_id: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=12, max_length=256)
+    role: Literal["evaluator"] = "evaluator"
 
 
 class UserView(BaseModel):
@@ -23,6 +34,9 @@ class UserView(BaseModel):
     id: str
     username: str
     role: str
+    first_name: str | None = None
+    last_name: str | None = None
+    school_id: str | None = None
 
 
 class TokenView(BaseModel):
@@ -41,6 +55,8 @@ class RelationshipView(BaseModel):
     evaluator_id: str
     student_username: str
     evaluator_username: str
+    student_name: str
+    evaluator_name: str
 
 
 class PublicKeyCreate(BaseModel):

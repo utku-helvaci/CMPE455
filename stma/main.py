@@ -18,7 +18,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from stma.database import Base, create_database
+from stma.database import create_database, initialize_database
 from stma.models import ChatMessage, Document, LoginSession, PublicKey, Relationship, User
 from stma.schemas import (
     Credentials,
@@ -68,7 +68,7 @@ def create_app(
 
     engine, session_factory = create_database(database_url)
     if initialize_schema:
-        Base.metadata.create_all(engine)
+        initialize_database(engine)
     storage_dir.mkdir(parents=True, exist_ok=True)
 
     app = FastAPI(title="STMA", version="0.1.0")
@@ -134,16 +134,19 @@ def create_app(
     @app.post("/api/auth/register", response_model=UserView, status_code=201)
     def register(payload: Registration, db: Session = Depends(get_db)) -> User:
         user = User(
-            username=payload.username,
+            username=payload.school_id.strip(),
             password_hash=hash_password(payload.password),
-            role=payload.role,
+            role="student",
+            first_name=payload.first_name.strip(),
+            last_name=payload.last_name.strip(),
+            school_id=payload.school_id.strip(),
         )
         db.add(user)
         try:
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail="Username is already registered.") from exc
+            raise HTTPException(status_code=409, detail="School ID is already registered.") from exc
         db.refresh(user)
         return user
 
@@ -186,16 +189,19 @@ def create_app(
     ) -> User:
         require_role(user, "sysadmin")
         new_user = User(
-            username=payload.username,
+            username=payload.school_id.strip(),
             password_hash=hash_password(payload.password),
             role=payload.role,
+            first_name=payload.first_name.strip(),
+            last_name=payload.last_name.strip(),
+            school_id=payload.school_id.strip(),
         )
         db.add(new_user)
         try:
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail="Username is already registered.") from exc
+            raise HTTPException(status_code=409, detail="School ID is already registered.") from exc
         db.refresh(new_user)
         return new_user
 
@@ -231,6 +237,10 @@ def create_app(
             evaluator_id=evaluator.id,
             student_username=student.username,
             evaluator_username=evaluator.username,
+            student_name=" ".join(filter(None, [student.first_name, student.last_name]))
+            or student.username,
+            evaluator_name=" ".join(filter(None, [evaluator.first_name, evaluator.last_name]))
+            or evaluator.username,
         )
 
     @app.get("/api/relationships", response_model=list[RelationshipView])
@@ -256,6 +266,17 @@ def create_app(
                 evaluator_id=relationship.evaluator_id,
                 student_username=relationship.student.username,
                 evaluator_username=relationship.evaluator.username,
+                student_name=" ".join(
+                    filter(None, [relationship.student.first_name, relationship.student.last_name])
+                )
+                or relationship.student.username,
+                evaluator_name=" ".join(
+                    filter(
+                        None,
+                        [relationship.evaluator.first_name, relationship.evaluator.last_name],
+                    )
+                )
+                or relationship.evaluator.username,
             )
             for relationship in relationships
         ]

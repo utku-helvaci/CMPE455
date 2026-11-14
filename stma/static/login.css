@@ -226,6 +226,46 @@ button:disabled {
   text-align: center;
 }
 
+.text-button {
+  padding: 0;
+  border: 0;
+  color: #315b98;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-button:hover {
+  color: #1d407a;
+}
+
+.name-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.name-fields input {
+  min-width: 0;
+}
+
+.password-hint {
+  margin: -14px 0 16px;
+  color: #8792a2;
+  font-size: 10px;
+}
+
+.signup-security-note {
+  margin: 14px 0 0;
+  color: #7a8799;
+  font-size: 10px;
+  line-height: 1.55;
+  text-align: center;
+}
+
 .message {
   margin: 0 0 16px;
   color: #a02b36;

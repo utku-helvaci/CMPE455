@@ -120,7 +120,7 @@ function counterpartFor(relationship) {
   const isStudent = state.user.role === "student";
   return {
     id: isStudent ? relationship.evaluator_id : relationship.student_id,
-    name: isStudent ? relationship.evaluator_username : relationship.student_username,
+    name: isStudent ? relationship.evaluator_name : relationship.student_name,
     role: isStudent ? "Evaluator" : "Student",
   };
 }
@@ -169,7 +169,8 @@ async function startWorkspace(token, user) {
   state.encryptionPrivatePem = null;
   workspaceLoginView.hidden = true;
   workspace.hidden = false;
-  document.querySelector("#workspace-account-name").textContent = user.username;
+  document.querySelector("#workspace-account-name").textContent =
+    [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
   document.querySelector("#workspace-account-role").textContent = user.role;
   document.title = `STMA Workspace · ${user.username}`;
 

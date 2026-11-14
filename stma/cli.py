@@ -7,7 +7,7 @@ import re
 
 from sqlalchemy import select
 
-from stma.database import Base, create_database
+from stma.database import create_database, initialize_database
 from stma.models import User
 from stma.security import hash_password
 
@@ -23,7 +23,7 @@ def create_admin(username: str) -> None:
 
     url = os.getenv("DATABASE_URL", "sqlite:///./stma.db")
     engine, session_factory = create_database(url)
-    Base.metadata.create_all(engine)
+    initialize_database(engine)
     try:
         with session_factory.begin() as db:
             if db.scalar(select(User.id).where(User.username == username)) is not None:

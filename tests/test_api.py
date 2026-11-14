@@ -21,7 +21,6 @@ def test_registration_login_and_relationship_access(tmp_path):
                 role="sysadmin",
             )
         )
-
     with TestClient(app) as client:
         page = client.get("/")
         assert page.status_code == 200
@@ -30,24 +29,52 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert client.get("/static/login.js").status_code == 200
         assert client.get("/static/workspace.js").status_code == 200
         assert client.get("/static/document-crypto.js").status_code == 200
+        assert 'id="signup-form"' in page.text
 
         student = client.post(
             "/api/auth/register",
-            json={"username": "student1", "password": "student password long", "role": "student"},
-        )
-        evaluator = client.post(
-            "/api/auth/register",
             json={
-                "username": "evaluator1",
-                "password": "evaluator password long",
-                "role": "evaluator",
+                "first_name": "Stu",
+                "last_name": "Dent",
+                "school_id": "student1",
+                "password": "student password long",
             },
         )
         outsider = client.post(
             "/api/auth/register",
-            json={"username": "student2", "password": "another password long", "role": "student"},
+            json={
+                "first_name": "Other",
+                "last_name": "Student",
+                "school_id": "student2",
+                "password": "another password long",
+            },
         )
-        assert student.status_code == evaluator.status_code == outsider.status_code == 201
+        assert student.status_code == outsider.status_code == 201
+        assert student.json()["role"] == "student"
+        assert student.json()["first_name"] == "Stu"
+        assert student.json()["last_name"] == "Dent"
+        assert student.json()["school_id"] == "student1"
+        duplicate_school_id = client.post(
+            "/api/auth/register",
+            json={
+                "first_name": "Duplicate",
+                "last_name": "Student",
+                "school_id": "student1",
+                "password": "another student password",
+            },
+        )
+        assert duplicate_school_id.status_code == 409
+        rejected_registration = client.post(
+            "/api/auth/register",
+            json={
+                "first_name": "Not",
+                "last_name": "An Evaluator",
+                "school_id": "evaluator2",
+                "password": "another student password",
+                "role": "evaluator",
+            },
+        )
+        assert rejected_registration.status_code == 422
 
         admin_login = client.post(
             "/api/auth/login",
@@ -56,17 +83,37 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert admin_login.status_code == 200
         admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
+        evaluator = client.post(
+            "/api/admin/users",
+            headers=admin_headers,
+            json={
+                "first_name": "Terry",
+                "last_name": "Teacher",
+                "school_id": "teacher123",
+                "password": "teacher password long",
+            },
+        )
+        assert evaluator.status_code == 201
+        assert evaluator.json()["role"] == "evaluator"
+        assert evaluator.json()["school_id"] == "teacher123"
+        evaluator_login = client.post(
+            "/api/auth/login",
+            json={"username": "teacher123", "password": "teacher password long"},
+        )
+        evaluator_id = evaluator.json()["id"]
         relation = client.post(
             "/api/admin/relationships",
             headers=admin_headers,
             json={
                 "student_id": student.json()["id"],
-                "evaluator_id": evaluator.json()["id"],
+                "evaluator_id": evaluator_id,
             },
         )
         assert relation.status_code == 201
         assert relation.json()["student_username"] == "student1"
-        assert relation.json()["evaluator_username"] == "evaluator1"
+        assert relation.json()["student_name"] == "Stu Dent"
+        assert relation.json()["evaluator_username"] == "teacher123"
+        assert relation.json()["evaluator_name"] == "Terry Teacher"
         relationship_id = relation.json()["id"]
 
         student_login = client.post(
@@ -76,11 +123,8 @@ def test_registration_login_and_relationship_access(tmp_path):
         student_headers = {"Authorization": f"Bearer {student_login.json()['access_token']}"}
         student_relationships = client.get("/api/relationships", headers=student_headers)
         assert student_relationships.status_code == 200
-        assert student_relationships.json()[0]["evaluator_username"] == "evaluator1"
-        evaluator_login = client.post(
-            "/api/auth/login",
-            json={"username": "evaluator1", "password": "evaluator password long"},
-        )
+        assert student_relationships.json()[0]["evaluator_username"] == "teacher123"
+        assert student_relationships.json()[0]["evaluator_name"] == "Terry Teacher"
         evaluator_headers = {"Authorization": f"Bearer {evaluator_login.json()['access_token']}"}
 
         message = client.post(
