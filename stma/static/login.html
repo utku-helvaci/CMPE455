@@ -66,7 +66,8 @@
             </form>
 
             <p class="help-note">
-              Students: <button id="show-signup" class="text-button" type="button">create an account</button>
+              New to STMA?
+              <button id="show-signup" class="text-button" type="button">Create an account</button>
             </p>
           </div>
 
@@ -123,12 +124,17 @@
                 required
               >
               <p class="password-hint">Use at least 12 characters.</p>
+              <label for="account-role">I am a</label>
+              <select id="account-role" name="role" required>
+                <option value="student">Student</option>
+                <option value="evaluator">Teacher / evaluator</option>
+              </select>
               <p class="signup-security-note">
                 You do not need to upload any key files to sign up. Private keys are created later and must never be shared.
               </p>
               <p id="signup-message" class="message" role="alert" hidden></p>
               <button id="signup-button" class="primary-button" type="submit">
-                <span>Create student account</span>
+                <span id="signup-button-label">Create account</span>
                 <span aria-hidden="true">→</span>
               </button>
             </form>
@@ -161,6 +167,22 @@
             <p class="eyebrow">YOUR WORKSPACE</p>
             <h1>Conversations</h1>
           </div>
+          <form id="add-student-form" class="add-student-form" hidden>
+            <label for="student-school-id">Add a student by School ID</label>
+            <div class="add-student-row">
+              <input
+                id="student-school-id"
+                name="school_id"
+                type="text"
+                minlength="3"
+                maxlength="80"
+                pattern="[A-Za-z0-9._\-]+"
+                required
+              >
+              <button type="submit" aria-label="Add student">＋</button>
+            </div>
+            <p id="add-student-message" class="sidebar-message" role="alert" hidden></p>
+          </form>
           <div id="relationship-list" class="relationship-list"></div>
           <p class="sidebar-footnote">Only your assigned training relationships are shown.</p>
         </aside>
@@ -178,7 +200,12 @@
                 <p id="counterpart-role" class="eyebrow"></p>
                 <h2 id="counterpart-name"></h2>
               </div>
-              <div class="connection-status"><span aria-hidden="true"></span> Connected</div>
+              <div class="conversation-actions">
+                <button id="disown-student" class="disown-button" type="button" hidden>
+                  Disown student
+                </button>
+                <div class="connection-status"><span aria-hidden="true"></span> Connected</div>
+              </div>
             </header>
 
             <nav class="workspace-tabs" role="tablist" aria-label="Workspace sections">

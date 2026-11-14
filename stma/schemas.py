@@ -16,6 +16,7 @@ class Registration(BaseModel):
     last_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
     school_id: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(min_length=12, max_length=256)
+    role: Literal["student", "evaluator"] = "student"
 
 
 class UserCreate(BaseModel):
@@ -47,6 +48,10 @@ class TokenView(BaseModel):
 class RelationshipCreate(BaseModel):
     student_id: str
     evaluator_id: str
+
+
+class StudentSelection(BaseModel):
+    school_id: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
 
 
 class RelationshipView(BaseModel):

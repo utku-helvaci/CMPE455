@@ -14,6 +14,7 @@ const documentInput = document.querySelector("#document-file");
 const keyList = document.querySelector("#key-list");
 const logoutButton = document.querySelector("#logout-button");
 const logoutMessage = document.querySelector("#logout-message");
+const addStudentForm = document.querySelector("#add-student-form");
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -153,10 +154,25 @@ function renderRelationships() {
   }
 
   if (state.relationships.length === 0) {
-    document.querySelector("#empty-title").textContent = "No training relationship yet";
-    document.querySelector("#empty-description").textContent =
-      "Your Sysadmin needs to assign your student–evaluator relationship before you can chat or exchange reports.";
+    setEmptyWorkspace();
   }
+}
+
+function setEmptyWorkspace(message = "") {
+  const isEvaluator = state.user?.role === "evaluator";
+  document.querySelector("#empty-title").textContent = message
+    ? "Relationship ended"
+    : isEvaluator
+      ? "Choose a student to work with"
+      : "No teacher has selected you yet";
+  document.querySelector("#empty-description").textContent =
+    message ||
+    (isEvaluator
+      ? "Add a student using their exact School ID. You can end a relationship at any time."
+      : "A teacher can add you using your School ID. Once they do, your conversation and report exchange will appear here.");
+  emptyWorkspace.hidden = false;
+  relationshipWorkspace.hidden = true;
+  document.querySelector("#disown-student").hidden = true;
 }
 
 async function startWorkspace(token, user) {
@@ -175,6 +191,7 @@ async function startWorkspace(token, user) {
   document.title = `STMA Workspace · ${user.username}`;
 
   if (user.role === "sysadmin") {
+    addStudentForm.hidden = true;
     clientWorkspace.hidden = true;
     adminWorkspace.hidden = false;
     await refreshHealth();
@@ -183,10 +200,10 @@ async function startWorkspace(token, user) {
 
   adminWorkspace.hidden = true;
   clientWorkspace.hidden = false;
+  addStudentForm.hidden = user.role !== "evaluator";
   state.relationships = await api("/api/relationships");
   renderRelationships();
-  emptyWorkspace.hidden = false;
-  relationshipWorkspace.hidden = true;
+  setEmptyWorkspace();
 }
 
 async function stopWorkspace() {
@@ -224,6 +241,7 @@ async function selectRelationship(relationshipId) {
   const counterpart = counterpartFor(state.relationship);
   document.querySelector("#counterpart-role").textContent = counterpart.role;
   document.querySelector("#counterpart-name").textContent = counterpart.name;
+  document.querySelector("#disown-student").hidden = state.user.role !== "evaluator";
   emptyWorkspace.hidden = true;
   relationshipWorkspace.hidden = false;
   setActivePanel("chat-panel");
@@ -318,7 +336,21 @@ async function refreshMessages(relationshipId) {
     }
   } catch (error) {
     setConnectionStatus(false);
-    if (error instanceof ApiError && error.status === 401) {
+    if (error instanceof ApiError && error.status === 404) {
+      try {
+        state.relationships = await api("/api/relationships");
+        const stillAssigned = state.relationships.some((item) => item.id === relationshipId);
+        renderRelationships();
+        if (!stillAssigned && state.relationship?.id === relationshipId) {
+          state.relationship = null;
+          clearInterval(state.pollTimer);
+          state.pollTimer = null;
+          setEmptyWorkspace("This relationship has ended. Its history remains stored.");
+        }
+      } catch (refreshError) {
+        showInlineMessage("chat-message", refreshError.message);
+      }
+    } else if (error instanceof ApiError && error.status === 401) {
       await stopWorkspace();
     } else {
       showInlineMessage("chat-message", error.message);
@@ -688,6 +720,65 @@ documentInput.addEventListener("change", () => {
 
 document.querySelector("#generate-keys-button").addEventListener("click", generateAndPublishKeys);
 document.querySelector("#refresh-health").addEventListener("click", refreshHealth);
+
+addStudentForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const schoolIdInput = document.querySelector("#student-school-id");
+  const addButton = addStudentForm.querySelector("button");
+  const message = document.querySelector("#add-student-message");
+  message.hidden = true;
+  addButton.disabled = true;
+  try {
+    const relationship = await api("/api/relationships", {
+      method: "POST",
+      body: JSON.stringify({ school_id: schoolIdInput.value.trim() }),
+    });
+    state.relationships = [
+      ...state.relationships.filter((item) => item.id !== relationship.id),
+      relationship,
+    ];
+    schoolIdInput.value = "";
+    renderRelationships();
+    await selectRelationship(relationship.id);
+  } catch (error) {
+    message.textContent = error.message;
+    message.hidden = false;
+  } finally {
+    addButton.disabled = false;
+  }
+});
+
+document.querySelector("#disown-student").addEventListener("click", async (event) => {
+  if (!state.relationship || state.user.role !== "evaluator") return;
+  const relationship = state.relationship;
+  const student = counterpartFor(relationship);
+  if (
+    !window.confirm(
+      `End your relationship with ${student.name}? They will lose access to this conversation and its reports. History will be retained. You can add them again later using their School ID.`,
+    )
+  ) {
+    return;
+  }
+
+  const button = event.currentTarget;
+  button.disabled = true;
+  hideInlineMessage("chat-message");
+  try {
+    await api(`/api/relationships/${relationship.id}`, { method: "DELETE" });
+    state.relationships = state.relationships.filter((item) => item.id !== relationship.id);
+    state.relationship = null;
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+    renderRelationships();
+    setEmptyWorkspace(
+      `${student.name} was removed from your active relationships. Past messages and encrypted reports remain stored.`,
+    );
+  } catch (error) {
+    showInlineMessage("chat-message", error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 document.querySelector("#signing-private-key").addEventListener("change", async (event) => {
   const file = event.target.files[0];

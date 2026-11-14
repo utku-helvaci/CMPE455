@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from Crypto.Cipher import DES
 from Crypto.PublicKey import RSA
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +31,7 @@ from stma.schemas import (
     Registration,
     RelationshipCreate,
     RelationshipView,
+    StudentSelection,
     TokenView,
     UserCreate,
     UserView,
@@ -115,7 +116,7 @@ def create_app(
 
     def get_relationship(db: Session, relationship_id: str) -> Relationship:
         relationship = db.get(Relationship, relationship_id)
-        if relationship is None:
+        if relationship is None or not relationship.active:
             raise HTTPException(status_code=404, detail="Relationship not found.")
         return relationship
 
@@ -136,7 +137,7 @@ def create_app(
         user = User(
             username=payload.school_id.strip(),
             password_hash=hash_password(payload.password),
-            role="student",
+            role=payload.role,
             first_name=payload.first_name.strip(),
             last_name=payload.last_name.strip(),
             school_id=payload.school_id.strip(),
@@ -222,8 +223,19 @@ def create_app(
             raise HTTPException(status_code=422, detail="student_id must identify a student.")
         if evaluator is None or evaluator.role != "evaluator":
             raise HTTPException(status_code=422, detail="evaluator_id must identify an evaluator.")
-        relationship = Relationship(student_id=student.id, evaluator_id=evaluator.id)
-        db.add(relationship)
+        relationship = db.scalar(
+            select(Relationship).where(
+                Relationship.student_id == student.id,
+                Relationship.evaluator_id == evaluator.id,
+            )
+        )
+        if relationship is not None:
+            if relationship.active:
+                raise HTTPException(status_code=409, detail="This relationship already exists.")
+            relationship.active = True
+        else:
+            relationship = Relationship(student_id=student.id, evaluator_id=evaluator.id)
+            db.add(relationship)
         try:
             db.commit()
         except IntegrityError as exc:
@@ -255,7 +267,8 @@ def create_app(
         relationships = list(
             db.scalars(
                 select(Relationship).where(
-                    (Relationship.student_id == user.id) | (Relationship.evaluator_id == user.id)
+                    Relationship.active.is_(True),
+                    (Relationship.student_id == user.id) | (Relationship.evaluator_id == user.id),
                 )
             )
         )
@@ -280,6 +293,73 @@ def create_app(
             )
             for relationship in relationships
         ]
+
+    @app.post("/api/relationships", response_model=RelationshipView, status_code=201)
+    def select_student(
+        payload: StudentSelection,
+        response: Response,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> RelationshipView:
+        require_role(user, "evaluator")
+        student = db.scalar(
+            select(User).where(
+                User.school_id == payload.school_id.strip(),
+                User.role == "student",
+            )
+        )
+        if student is None:
+            raise HTTPException(status_code=404, detail="No student found with that School ID.")
+
+        relationship = db.scalar(
+            select(Relationship).where(
+                Relationship.student_id == student.id,
+                Relationship.evaluator_id == user.id,
+            )
+        )
+        if relationship is not None:
+            if relationship.active:
+                raise HTTPException(
+                    status_code=409, detail="This student is already in your relationships."
+                )
+            relationship.active = True
+            response.status_code = 200
+        else:
+            relationship = Relationship(student_id=student.id, evaluator_id=user.id)
+            db.add(relationship)
+
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409, detail="This student is already in your relationships."
+            ) from exc
+
+        return RelationshipView(
+            id=relationship.id,
+            student_id=student.id,
+            evaluator_id=user.id,
+            student_username=student.username,
+            evaluator_username=user.username,
+            student_name=" ".join(filter(None, [student.first_name, student.last_name]))
+            or student.username,
+            evaluator_name=" ".join(filter(None, [user.first_name, user.last_name]))
+            or user.username,
+        )
+
+    @app.delete("/api/relationships/{relationship_id}", status_code=204)
+    def disown_student(
+        relationship_id: str,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> None:
+        require_role(user, "evaluator")
+        relationship = get_relationship(db, relationship_id)
+        if relationship.evaluator_id != user.id:
+            raise HTTPException(status_code=404, detail="Relationship not found.")
+        relationship.active = False
+        db.commit()
 
     @app.post(
         "/api/relationships/{relationship_id}/keys", response_model=PublicKeyView, status_code=201
@@ -526,7 +606,10 @@ def create_app(
         return {
             "status": "ok",
             "users": db.scalar(select(func.count()).select_from(User)) or 0,
-            "relationships": db.scalar(select(func.count()).select_from(Relationship)) or 0,
+            "relationships": db.scalar(
+                select(func.count()).select_from(Relationship).where(Relationship.active.is_(True))
+            )
+            or 0,
             "documents": db.scalar(select(func.count()).select_from(Document)) or 0,
         }
 

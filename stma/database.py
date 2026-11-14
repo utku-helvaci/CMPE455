@@ -17,6 +17,9 @@ def initialize_database(engine: Engine) -> None:
     Base.metadata.create_all(engine)
 
     user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    relationship_columns = {
+        column["name"] for column in inspect(engine).get_columns("relationships")
+    }
     with engine.begin() as connection:
         for column_name in ("first_name", "last_name", "school_id"):
             if column_name not in user_columns:
@@ -24,6 +27,10 @@ def initialize_database(engine: Engine) -> None:
         if "student_id" in user_columns:
             connection.execute(
                 text("UPDATE users SET school_id = student_id WHERE school_id IS NULL")
+            )
+        if "active" not in relationship_columns:
+            connection.execute(
+                text("ALTER TABLE relationships ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE")
             )
     from stma.models import User
 

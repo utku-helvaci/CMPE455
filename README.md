@@ -5,7 +5,8 @@ Summer Training Management Application: a Python API for student–evaluator cha
 ## Current implementation
 
 - A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
-- Student and evaluator accounts use the same unique school ID, which is also the login name. Students self-register with their name, surname, school ID, and password; Sysadmins create evaluator accounts and assign training relationships. Sysadmins can use a separate username without a school ID.
+- Students and teachers can self-register with their name, surname, school ID, password, and role. Their unique school ID is also their login name. Sysadmins can use a separate username without a school ID.
+- Teachers add students by entering the exact school ID, without browsing a directory. Teachers can end a relationship; this removes active access but retains the old messages and encrypted files. Re-adding the same student restores that relationship and its history.
 - Existing SQLite databases are updated at startup to add the new student profile columns; existing accounts remain in place.
 - FastAPI and Uvicorn provide the HTTP API.
 - PostgreSQL is the intended shared database. SQLite is the local-development default.
@@ -49,9 +50,9 @@ For a two-computer demonstration, set the server host address reachable from the
 
 ## Initial workflow
 
-1. Students sign up at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration. A Sysadmin creates evaluator accounts at `POST /api/admin/users` with their name, surname, school ID, and password, then assigns the relationship at `POST /api/admin/relationships`.
-2. Students and evaluators log in at `/` with their school ID and password. Sysadmins use their provisioned username.
-3. The Sysadmin assigns the client accounts using `POST /api/admin/relationships`.
+1. Students and teachers sign up at `/` with name, surname, school ID, role, and a password of at least 12 characters. No keys or key files are needed during registration.
+2. Students and teachers log in at `/` with their school ID and password. Sysadmins use their provisioned username.
+3. Teachers enter a student's exact school ID in the workspace to add the relationship. Sysadmins can also create relationships using `POST /api/admin/relationships`.
 4. Each participant generates separate signing and encryption RSA key pairs locally and publishes the public keys to `POST /api/relationships/{id}/keys`. Verify key fingerprints out of band before relying on them.
 5. The sender signs and encrypts the report locally, wraps the DES key for the recipient, then sends the ciphertext and key references to `POST /api/relationships/{id}/documents`.
 6. The recipient downloads the encrypted package from `GET /api/relationships/{id}/documents`, unwraps the DES key locally, decrypts the report, and verifies its signature with the sender's signing public key.

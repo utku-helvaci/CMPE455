@@ -82,6 +82,7 @@ signupForm.addEventListener("submit", async (event) => {
   const formData = new FormData(signupForm);
   const username = formData.get("school_id");
   const password = formData.get("password");
+  const role = formData.get("role");
 
   try {
     const response = await fetch("/api/auth/register", {
@@ -92,6 +93,7 @@ signupForm.addEventListener("submit", async (event) => {
         last_name: formData.get("last_name"),
         school_id: username,
         password,
+        role,
       }),
     });
     if (!response.ok) {
@@ -117,3 +119,7 @@ signupForm.addEventListener("submit", async (event) => {
 
 document.querySelector("#show-signup").addEventListener("click", showSignup);
 document.querySelector("#show-login").addEventListener("click", showLogin);
+document.querySelector("#account-role").addEventListener("change", (event) => {
+  document.querySelector("#signup-button-label").textContent =
+    event.target.value === "evaluator" ? "Create teacher account" : "Create student account";
+});
