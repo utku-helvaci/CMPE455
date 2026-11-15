@@ -81,6 +81,15 @@ def create_app(
     app.state.session_hours = session_hours
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
+    @app.middleware("http")
+    async def revalidate_frontend(request: Request, call_next):
+        # Without this, browsers heuristically cache the page scripts and keep
+        # running a stale build against newer HTML after a redeploy.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.get("/", include_in_schema=False)
     def login_page() -> FileResponse:
         return FileResponse(Path(__file__).parent / "static" / "login.html")
