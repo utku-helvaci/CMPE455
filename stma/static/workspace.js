@@ -194,7 +194,7 @@ async function startWorkspace(token, user) {
     addStudentForm.hidden = true;
     clientWorkspace.hidden = true;
     adminWorkspace.hidden = false;
-    await Promise.all([refreshHealth(), refreshAdminUsers()]);
+    await refreshAdminDashboard();
     return;
   }
 
@@ -655,8 +655,6 @@ async function uploadDocument(file) {
 }
 
 async function refreshHealth() {
-  const button = document.querySelector("#refresh-health");
-  button.disabled = true;
   hideInlineMessage("health-message");
   try {
     const health = await api("/api/admin/health");
@@ -679,14 +677,10 @@ async function refreshHealth() {
     }
   } catch (error) {
     showInlineMessage("health-message", error.message);
-  } finally {
-    button.disabled = false;
   }
 }
 
 async function refreshAdminUsers() {
-  const button = document.querySelector("#refresh-admin-users");
-  button.disabled = true;
   hideInlineMessage("admin-users-message");
   try {
     const users = await api("/api/admin/users");
@@ -758,7 +752,7 @@ async function refreshAdminUsers() {
         hideInlineMessage("admin-users-message");
         try {
           await api(`/api/admin/users/${account.id}`, { method: "DELETE" });
-          await Promise.all([refreshAdminUsers(), refreshHealth()]);
+          await refreshAdminDashboard();
           showInlineMessage(
             "admin-users-message",
             `${name.textContent} and associated data were permanently deleted.`,
@@ -766,7 +760,7 @@ async function refreshAdminUsers() {
           );
         } catch (error) {
           if (error instanceof ApiError && error.status === 500) {
-            await Promise.all([refreshAdminUsers(), refreshHealth()]);
+            await refreshAdminDashboard();
             showInlineMessage("admin-users-message", error.message);
           } else {
             showInlineMessage("admin-users-message", error.message);
@@ -779,6 +773,14 @@ async function refreshAdminUsers() {
     }
   } catch (error) {
     showInlineMessage("admin-users-message", error.message);
+  }
+}
+
+async function refreshAdminDashboard() {
+  const button = document.querySelector("#refresh-admin-data");
+  button.disabled = true;
+  try {
+    await Promise.all([refreshAdminUsers(), refreshHealth()]);
   } finally {
     button.disabled = false;
   }
@@ -819,8 +821,7 @@ documentInput.addEventListener("change", () => {
 });
 
 document.querySelector("#generate-keys-button").addEventListener("click", generateAndPublishKeys);
-document.querySelector("#refresh-health").addEventListener("click", refreshHealth);
-document.querySelector("#refresh-admin-users").addEventListener("click", refreshAdminUsers);
+document.querySelector("#refresh-admin-data").addEventListener("click", refreshAdminDashboard);
 
 addStudentForm.addEventListener("submit", async (event) => {
   event.preventDefault();
