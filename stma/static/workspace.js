@@ -744,7 +744,37 @@ async function refreshAdminUsers() {
           assignButton.disabled = false;
         }
       });
-      row.append(roleSelect, assignButton);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "admin-delete-button";
+      deleteButton.textContent = "Delete user";
+      deleteButton.setAttribute("aria-label", `Delete ${name.textContent}`);
+      deleteButton.addEventListener("click", async () => {
+        const confirmed = window.confirm(
+          `Permanently delete ${name.textContent} (${schoolId.textContent})? This also deletes all of their relationships, messages, public keys, reports, and stored encrypted report files. This cannot be undone.`,
+        );
+        if (!confirmed) return;
+        deleteButton.disabled = true;
+        hideInlineMessage("admin-users-message");
+        try {
+          await api(`/api/admin/users/${account.id}`, { method: "DELETE" });
+          await Promise.all([refreshAdminUsers(), refreshHealth()]);
+          showInlineMessage(
+            "admin-users-message",
+            `${name.textContent} and associated data were permanently deleted.`,
+            true,
+          );
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 500) {
+            await Promise.all([refreshAdminUsers(), refreshHealth()]);
+            showInlineMessage("admin-users-message", error.message);
+          } else {
+            showInlineMessage("admin-users-message", error.message);
+            deleteButton.disabled = false;
+          }
+        }
+      });
+      row.append(roleSelect, assignButton, deleteButton);
       list.append(row);
     }
   } catch (error) {

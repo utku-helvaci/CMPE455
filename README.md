@@ -7,6 +7,7 @@ Summer Training Management Application: a Python API for student–evaluator cha
 - A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
 - Students and teachers can register with their name, surname, school ID, and password. New accounts remain pending until a Sysadmin assigns the student or evaluator role from the admin workspace; pending users cannot sign in. Existing account roles are preserved. Student and evaluator school IDs are also their login names; Sysadmins can use a separate username.
 - Teachers add students by entering the exact school ID, without browsing a directory. Teachers can end a relationship; this removes active access but retains the old messages and encrypted files. Re-adding the same student restores that relationship and its history.
+- Sysadmins can permanently delete a student or evaluator account from the admin workspace. This also removes the account's relationships, messages, public keys, report records, and stored encrypted report files; the action cannot be undone. Sysadmin accounts are not exposed in the user list.
 - Existing SQLite databases are updated at startup to add the new student profile columns; existing accounts remain in place.
 - FastAPI and Uvicorn provide the HTTP API.
 - PostgreSQL is the intended shared database. SQLite is the local-development default.

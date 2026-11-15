@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from stma.crypto import decrypt_and_verify_document, encrypt_document, generate_rsa_key_pair
 from stma.main import create_app
-from stma.models import ChatMessage, Relationship, User
+from stma.models import ChatMessage, Document, LoginSession, PublicKey, Relationship, User
 from stma.security import hash_password
 
 
@@ -96,6 +96,8 @@ def test_registration_login_and_relationship_access(tmp_path):
         )
         assert admin_login.status_code == 200
         admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+        with app.state.session_factory() as db:
+            admin_id = db.query(User.id).filter_by(username="sysadmin").scalar()
 
         pending_login = client.post(
             "/api/auth/login",
@@ -163,6 +165,11 @@ def test_registration_login_and_relationship_access(tmp_path):
             json={"role": "evaluator"},
         )
         assert denied_role_assignment.status_code == 403
+        denied_account_deletion = client.delete(
+            f"/api/admin/users/{outsider.json()['id']}",
+            headers=student_headers,
+        )
+        assert denied_account_deletion.status_code == 403
         student_cannot_choose_teacher = client.post(
             "/api/relationships",
             headers=student_headers,
@@ -336,3 +343,27 @@ def test_registration_login_and_relationship_access(tmp_path):
         health = client.get("/api/admin/health", headers=admin_headers)
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
+
+        with app.state.session_factory() as db:
+            stored_document = db.query(Document).filter_by(relationship_id=relationship_id).one()
+            stored_path = tmp_path / "encrypted" / stored_document.storage_name
+            assert stored_path.exists()
+        delete_account = client.delete(
+            f"/api/admin/users/{student.json()['id']}",
+            headers=admin_headers,
+        )
+        assert delete_account.status_code == 204
+        assert not stored_path.exists()
+        assert client.get("/api/relationships", headers=student_headers).status_code == 401
+        with app.state.session_factory() as db:
+            assert db.get(User, student.json()["id"]) is None
+            assert db.query(Relationship).filter_by(id=relationship_id).count() == 0
+            assert db.query(ChatMessage).filter_by(relationship_id=relationship_id).count() == 0
+            assert db.query(Document).filter_by(relationship_id=relationship_id).count() == 0
+            assert db.query(PublicKey).filter_by(user_id=student.json()["id"]).count() == 0
+            assert db.query(LoginSession).filter_by(user_id=student.json()["id"]).count() == 0
+        delete_admin_account = client.delete(
+            f"/api/admin/users/{admin_id}",
+            headers=admin_headers,
+        )
+        assert delete_admin_account.status_code == 404

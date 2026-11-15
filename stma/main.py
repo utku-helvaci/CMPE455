@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -261,6 +261,83 @@ def create_app(
         db.commit()
         db.refresh(target)
         return target
+
+    @app.delete("/api/admin/users/{user_id}", status_code=204)
+    def delete_user(
+        user_id: str,
+        request: Request,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> None:
+        require_role(user, "sysadmin")
+        target = db.get(User, user_id)
+        if target is None or target.role == "sysadmin":
+            raise HTTPException(status_code=404, detail="Account not found.")
+
+        relationship_ids = list(
+            db.scalars(
+                select(Relationship.id).where(
+                    or_(
+                        Relationship.student_id == target.id,
+                        Relationship.evaluator_id == target.id,
+                    )
+                )
+            )
+        )
+        public_keys = list(db.scalars(select(PublicKey).where(PublicKey.user_id == target.id)))
+        public_key_ids = [key.id for key in public_keys]
+        document_filters = [Document.sender_id == target.id]
+        if relationship_ids:
+            document_filters.append(Document.relationship_id.in_(relationship_ids))
+        if public_key_ids:
+            document_filters.extend(
+                [
+                    Document.recipient_key_id.in_(public_key_ids),
+                    Document.signing_key_id.in_(public_key_ids),
+                ]
+            )
+        documents = list(db.scalars(select(Document).where(or_(*document_filters))))
+        storage_paths = [
+            request.app.state.storage_dir / record.storage_name for record in documents
+        ]
+
+        message_filters = [ChatMessage.sender_id == target.id]
+        if relationship_ids:
+            message_filters.append(ChatMessage.relationship_id.in_(relationship_ids))
+        for record in documents:
+            db.delete(record)
+        for message in db.scalars(select(ChatMessage).where(or_(*message_filters))):
+            db.delete(message)
+        for key in public_keys:
+            db.delete(key)
+        for relationship in db.scalars(
+            select(Relationship).where(
+                or_(
+                    Relationship.student_id == target.id,
+                    Relationship.evaluator_id == target.id,
+                )
+            )
+        ):
+            db.delete(relationship)
+        for login in db.scalars(select(LoginSession).where(LoginSession.user_id == target.id)):
+            db.delete(login)
+        db.delete(target)
+        db.commit()
+
+        failed_cleanup = []
+        for storage_path in storage_paths:
+            try:
+                storage_path.unlink(missing_ok=True)
+            except OSError:
+                failed_cleanup.append(storage_path.name)
+        if failed_cleanup:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "The account and database records were deleted, but some encrypted files "
+                    f"could not be removed: {', '.join(failed_cleanup)}."
+                ),
+            )
 
     @app.post(
         "/api/admin/relationships",
