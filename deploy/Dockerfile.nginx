@@ -1,0 +1,17 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      nginx-extras \
+      libnginx-mod-http-geoip2 \
+      libnginx-mod-http-xslt-filter \
+      libnginx-mod-stream \
+      libnginx-mod-mail \
+      libnginx-mod-http-image-filter \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default
+
+EXPOSE 80 443
+CMD ["nginx", "-g", "daemon off;"]

@@ -49,6 +49,26 @@ Open `http://localhost:8000/` for the sign-in page and workspace, or `http://loc
 
 For a two-computer demonstration, set the server host address reachable from the client computers and use a TLS reverse proxy such as Nginx. Do not expose the development server directly to an untrusted network.
 
+## Headless Docker server on a LAN
+
+The Docker Compose deployment runs the STMA app, PostgreSQL 16, and Nginx as separate containers. It persists the database and encrypted report storage in Docker volumes, publishes HTTPS on port 8000, and redirects HTTP on port 8001 to HTTPS. The app container installs the Python dependencies plus Alembic, `pgspecial`, and PyGreSQL; the Nginx container includes the GeoIP, XSLT, stream, mail, and image-filter modules. STMA itself does not currently use the optional PostgreSQL shell/driver or those extra Nginx modules.
+
+Install Docker Engine or Docker Desktop with the Compose plugin, and OpenSSL. From the project root, run:
+
+```sh
+./deploy/start.sh
+```
+
+The script generates a database password and a local certificate authority, then builds and starts the containers. To use a particular network address instead of automatic detection, run `STMA_LAN_IP=192.168.1.20 ./deploy/start.sh` with the server computer's LAN IP. Create the first Sysadmin account in a terminal:
+
+```sh
+docker compose --env-file .env.docker run --rm app python -m stma.cli create-admin sysadmin
+```
+
+Open `https://<server-lan-ip>:8000/` from the server or another computer on the same trusted LAN. For browser Web Crypto to work, install `deploy/certs/ca.crt` as a trusted certificate authority on each client computer; the CA private key remains on the server and is not mounted into a container. The certificate is valid for the LAN IP chosen at setup. If that address changes, update `STMA_LAN_IP` in `.env.docker` and rerun `./deploy/start.sh`.
+
+The deployment uses a Docker bridge network; PostgreSQL and the app port are not published to the host. Only Nginx is reachable externally. Allow inbound TCP ports 8000 (HTTPS) and, if desired, 8001 (HTTP redirect) in the server's firewall for the trusted LAN only. Do not forward these ports from a router to the public internet. Keep `.env.docker`, `deploy/certs/ca.key`, the database volume, and the encrypted-document volume backed up and restricted. `docker compose --env-file .env.docker down` stops the server without deleting its data; do not use `down -v` unless you intend to permanently remove the database and uploaded files.
+
 ## Initial workflow
 
 1. Students and teachers register at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration.

@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stma
+      POSTGRES_USER: stma
+      POSTGRES_PASSWORD: ${STMA_POSTGRES_PASSWORD:?Run deploy/start.sh to create deployment settings}
+    volumes:
+      - stma_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stma -d stma"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - backend
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://stma:${STMA_POSTGRES_PASSWORD}@db:5432/stma
+      STMA_STORAGE_DIR: /app/storage
+      STMA_SESSION_HOURS: "12"
+    volumes:
+      - stma_documents:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.nginx
+    restart: unless-stopped
+    ports:
+      - "8000:443"
+      - "8001:80"
+    volumes:
+      - ./deploy/certs:/etc/nginx/certs:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  stma_postgres:
+  stma_documents:
+
+networks:
+  backend:
+    driver: bridge
