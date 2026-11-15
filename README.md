@@ -81,6 +81,28 @@ Open `https://<server-lan-ip>:8000/` from the server or another computer on the 
 
 The deployment uses a Docker bridge network; PostgreSQL and the app port are not published to the host. Only Nginx is reachable externally. Allow inbound TCP ports 8000 (HTTPS) and, if desired, 8001 (HTTP redirect) in the server's firewall for the trusted LAN only. Do not forward these ports from a router to the public internet. Keep `.env.docker`, `deploy/certs/ca.key`, the database volume, and the encrypted-document volume backed up and restricted. `docker compose --env-file .env.docker down` stops the server without deleting its data; do not use `down -v` unless you intend to permanently remove the database and uploaded files.
 
+### View the Docker database with HeidiSQL
+
+The PostgreSQL port is intentionally not exposed on the LAN. To connect HeidiSQL on the Docker host, run this temporary relay from the project directory and leave the terminal open:
+
+```sh
+docker run --rm --name stma-db-viewer \
+  --network "$(docker inspect "$(docker compose --env-file .env.docker ps -q db)" \
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" \
+  -p 127.0.0.1:5433:5433 \
+  alpine/socat TCP-LISTEN:5433,fork,reuseaddr TCP:db:5432
+```
+
+In HeidiSQL, create a **PostgreSQL** session with:
+
+- **Hostname / IP:** `127.0.0.1`
+- **Port:** `5433`
+- **User:** `stma`
+- **Database:** `stma`
+- **Password:** the value of `STMA_POSTGRES_PASSWORD` in the local `.env.docker` file
+
+The password is a local deployment secret. Do not paste it into chat, screenshots, or this README, and do not commit `.env.docker`. The relay binds only to localhost; it does not expose PostgreSQL to other computers. Stop it with **Ctrl+C** when finished. To connect from a different computer, use an SSH tunnel to the Docker host rather than publishing PostgreSQL to the LAN.
+
 ## Initial workflow
 
 1. Students and teachers register at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration.
