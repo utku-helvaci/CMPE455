@@ -7,6 +7,9 @@ class Base(DeclarativeBase):
     pass
 
 
+school_id_index: Index | None = None
+
+
 def create_database(url: str) -> tuple[Engine, sessionmaker[Session]]:
     engine = create_engine(url, pool_pre_ping=True)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -14,6 +17,8 @@ def create_database(url: str) -> tuple[Engine, sessionmaker[Session]]:
 
 
 def initialize_database(engine: Engine) -> None:
+    global school_id_index
+
     Base.metadata.create_all(engine)
 
     user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
@@ -32,6 +37,8 @@ def initialize_database(engine: Engine) -> None:
             connection.execute(
                 text("ALTER TABLE relationships ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE")
             )
-    from stma.models import User
+    if school_id_index is None:
+        from stma.models import User
 
-    Index("uq_users_school_id", User.school_id, unique=True).create(engine, checkfirst=True)
+        school_id_index = Index("uq_users_school_id", User.school_id, unique=True)
+    school_id_index.create(engine, checkfirst=True)

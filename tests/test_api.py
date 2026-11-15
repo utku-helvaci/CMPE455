@@ -367,3 +367,41 @@ def test_registration_login_and_relationship_access(tmp_path):
             headers=admin_headers,
         )
         assert delete_admin_account.status_code == 404
+
+
+def test_login_logout_and_session_revocation(tmp_path):
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'logout.db'}",
+        storage_dir=tmp_path / "encrypted",
+    )
+    with app.state.session_factory.begin() as db:
+        db.add(
+            User(
+                username="sysadmin",
+                password_hash=hash_password("admin password long"),
+                role="sysadmin",
+            )
+        )
+        db.add(
+            User(
+                username="student",
+                password_hash=hash_password("student password long"),
+                role="student",
+            )
+        )
+
+    with TestClient(app) as client:
+        for username, password in (
+            ("sysadmin", "admin password long"),
+            ("student", "student password long"),
+        ):
+            login = client.post(
+                "/api/auth/login",
+                json={"username": username, "password": password},
+            )
+            assert login.status_code == 200
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+            assert client.get("/api/me", headers=headers).status_code == 200
+            assert client.post("/api/auth/logout", headers=headers).status_code == 204
+            assert client.get("/api/me", headers=headers).status_code == 401
+            assert client.post("/api/auth/logout", headers=headers).status_code == 401

@@ -39,6 +39,12 @@ Create the initial Sysadmin account; the password is requested interactively and
 python -m stma.cli create-admin sysadmin
 ```
 
+If a Sysadmin password is forgotten, reset it interactively without changing the account or its role. Existing sessions for that Sysadmin are revoked:
+
+```sh
+python -m stma.cli reset-admin-password sysadmin
+```
+
 Start the API:
 
 ```sh
@@ -63,6 +69,12 @@ The script generates a database password and a local certificate authority, then
 
 ```sh
 docker compose --env-file .env.docker run --rm app python -m stma.cli create-admin sysadmin
+```
+
+To recover a forgotten Docker-deployment Sysadmin password, run:
+
+```sh
+docker compose --env-file .env.docker run --rm app python -m stma.cli reset-admin-password sysadmin
 ```
 
 Open `https://<server-lan-ip>:8000/` from the server or another computer on the same trusted LAN. For browser Web Crypto to work, install `deploy/certs/ca.crt` as a trusted certificate authority on each client computer; the CA private key remains on the server and is not mounted into a container. The certificate is valid for the LAN IP chosen at setup. If that address changes, update `STMA_LAN_IP` in `.env.docker` and rerun `./deploy/start.sh`.

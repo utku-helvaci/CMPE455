@@ -68,7 +68,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     if (response.status === 401) {
-      throw new Error("Your session expired. Please sign in again.");
+      throw new ApiError("Your session expired. Please sign in again.", 401);
     }
     throw new ApiError(
       typeof body?.detail === "string" ? body.detail : "The request failed.",
@@ -217,6 +217,7 @@ async function stopWorkspace() {
   state.pendingCrypto.clear();
   state.token = null;
   state.user = null;
+  window.clearAccessToken?.();
   state.relationship = null;
   state.relationships = [];
   state.keys = [];
@@ -907,18 +908,22 @@ document.querySelector("#encryption-private-key").addEventListener("change", asy
 logoutButton.addEventListener("click", async () => {
   logoutMessage.hidden = true;
   logoutButton.disabled = true;
+  let logoutWarning = null;
   try {
     await api("/api/auth/logout", { method: "POST" });
-    await stopWorkspace();
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      await stopWorkspace();
-    } else {
-      logoutMessage.textContent = error.message;
-      logoutMessage.hidden = false;
+    if (!(error instanceof ApiError && error.status === 401)) {
+      logoutWarning =
+        "You were signed out on this device, but the server could not confirm session revocation. The session will expire automatically.";
     }
   } finally {
+    await stopWorkspace();
     logoutButton.disabled = false;
+  }
+  if (logoutWarning) {
+    const message = document.querySelector("#login-message");
+    message.textContent = logoutWarning;
+    message.hidden = false;
   }
 });
 

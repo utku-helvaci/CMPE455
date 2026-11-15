@@ -6,6 +6,9 @@ const loginMessage = document.querySelector("#login-message");
 const signupMessage = document.querySelector("#signup-message");
 
 let accessToken = null;
+window.clearAccessToken = () => {
+  accessToken = null;
+};
 
 function showMessage(element, message) {
   element.classList.remove("message-success");
