@@ -161,16 +161,27 @@ function renderRelationships() {
 
 function setEmptyWorkspace(message = "") {
   const isEvaluator = state.user?.role === "evaluator";
-  document.querySelector("#empty-title").textContent = message
-    ? "Relationship ended"
-    : isEvaluator
-      ? "Choose a student to work with"
-      : "No teacher has selected you yet";
-  document.querySelector("#empty-description").textContent =
-    message ||
-    (isEvaluator
-      ? "Add a student using their exact School ID. You can end a relationship at any time."
-      : "A teacher can add you using your School ID. Once they do, your conversation and report exchange will appear here.");
+  const hasRelationships = state.relationships.length > 0;
+  let title;
+  let description;
+  if (message) {
+    title = "Relationship ended";
+    description = message;
+  } else if (hasRelationships) {
+    title = "Your workspace is ready";
+    description = isEvaluator
+      ? "Choose a student on the left to view messages and shared reports, or add another student by School ID."
+      : "Choose your teacher on the left to view messages and shared reports.";
+  } else if (isEvaluator) {
+    title = "Choose a student to work with";
+    description = "Add a student using their exact School ID. You can end a relationship at any time.";
+  } else {
+    title = "No teacher has selected you yet";
+    description =
+      "A teacher can add you using your School ID. Once they do, your conversation and report exchange will appear here.";
+  }
+  document.querySelector("#empty-title").textContent = title;
+  document.querySelector("#empty-description").textContent = description;
   emptyWorkspace.hidden = false;
   relationshipWorkspace.hidden = true;
   document.querySelector("#disown-student").hidden = true;
