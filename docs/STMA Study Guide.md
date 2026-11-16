@@ -35,7 +35,7 @@ There is one server and many browsers. All encryption happens in the browser; th
 
 A new account starts with the role `pending` and cannot log in until the Sysadmin makes it a student or an evaluator.
 
-&#91;image: Use case diagram: what students, evaluators and the Sysadmin can do\]
+![Use case diagram: what students, evaluators and the Sysadmin can do](diagrams/01-use-case.png)
 
 ### The computers
 
@@ -47,7 +47,7 @@ The server computer runs three Docker containers:
 2. **The app** is the Python program (FastAPI). It checks logins and permissions, and reads and writes the database.
 3. **PostgreSQL** is the database. It is not reachable from outside.
 
-&#91;image: Deployment diagram: browsers on separate computers connect over HTTPS to Nginx, the app, the database and file storage on the server\]
+![Deployment diagram: browsers on separate computers connect over HTTPS to Nginx, the app, the database and file storage on the server](diagrams/02-architecture.png)
 
 Encrypted report files are saved in a folder on the server, not inside the database. The database only keeps a row describing each file.
 
@@ -84,7 +84,7 @@ Two terms you need: a **primary key** (PK) is the unique ID of a row. A **foreig
 
 ### How they relate
 
-&#91;image: Entity-relationship diagram of the six tables and their foreign keys\]
+![Entity-relationship diagram of the six tables and their foreign keys](diagrams/03-database-er.png)
 
 Read the diagram like this: every line is one foreign key, and the label is the column that holds it. Two bars mean "exactly one", the three-pronged end means "many".
 
@@ -176,11 +176,11 @@ Example: the student sends `report.pdf` to the teacher.
 4. **Wrap the key.** It encrypts the DES key with the teacher's encryption public key (RSA-OAEP).
 5. **Upload.** It sends three things to the server: the ciphertext, the IV and the wrapped DES key, plus the IDs of the two public keys that were used.
 
-&#91;image: Sequence diagram of sending a report: sign, pack, DES-encrypt and RSA-wrap in the browser, then upload and store\]
+![Sequence diagram of sending a report: sign, pack, DES-encrypt and RSA-wrap in the browser, then upload and store](diagrams/04-send-report-sequence.png)
 
 Because the signature is inside the encrypted package, the server cannot even see the signature. This order is called sign-then-encrypt.
 
-&#91;image: What is uploaded for one report: the DES-encrypted package of signature length, signature, file and padding, plus the IV and the RSA-wrapped DES key\]
+![What is uploaded for one report: the DES-encrypted package of signature length, signature, file and padding, plus the IV and the RSA-wrapped DES key](diagrams/06-document-package.png)
 
 ### The same five steps in the code
 
@@ -234,7 +234,7 @@ Example: the teacher clicks **Verify & download** on the student's report.
 5. **Verify.** It checks the signature against the file using the student's signing public key. If the file or signature was changed, or someone else signed it, the check fails and the file is not saved.
 6. **Save.** Only now does the browser offer the readable file.
 
-&#91;image: Sequence diagram of receiving a report: unwrap the DES key, decrypt, split, verify the signature, then save or refuse\]
+![Sequence diagram of receiving a report: unwrap the DES key, decrypt, split, verify the signature, then save or refuse](diagrams/05-receive-report-sequence.png)
 
 ### In the code
 
