@@ -113,6 +113,14 @@ docker run --rm --name stma-db-viewer \
   alpine/socat TCP-LISTEN:5433,fork,reuseaddr TCP:db:5432
 ```
 
+The command above is for Linux, macOS, or Git Bash. In Windows PowerShell, run this instead:
+
+```powershell
+$db = docker compose --env-file .env.docker ps -q db
+$network = docker inspect $db --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'
+docker run --rm --name stma-db-viewer --network $network -p 127.0.0.1:5433:5433 alpine/socat TCP-LISTEN:5433,fork,reuseaddr TCP:db:5432
+```
+
 In HeidiSQL, create a **PostgreSQL** session with:
 
 - **Hostname / IP:** `127.0.0.1`
