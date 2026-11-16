@@ -1,0 +1,31 @@
+@startuml 05-receive-report-sequence
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+title Receiving a report (evaluator)
+
+actor Evaluator
+participant "Evaluator's browser" as B
+participant "STMA server" as S
+database "Database" as DB
+collections "File storage" as FS
+
+B -> S : list documents of the relationship (HTTPS)
+S -> S : check requester is a participant
+S -> DB : read document rows
+S -> FS : read ciphertext
+S --> B : ciphertext, IV, wrapped DES key, key IDs
+
+Evaluator -> B : click "Verify & download"
+B -> B : 1. decrypt wrapped DES key with evaluator's\nencryption PRIVATE key (RSA-OAEP)
+B -> B : 2. decrypt ciphertext with DES key and IV\n(DES-CBC), remove padding
+B -> B : 3. split package into signature and file
+B -> B : 4. verify signature with student's\nsigning PUBLIC key (RSA-PSS, SHA-256)
+
+alt signature valid
+  B --> Evaluator : save file, "Signature verified"
+else wrong key, changed file or bad signature
+  B --> Evaluator : error, nothing is saved
+end
+@enduml

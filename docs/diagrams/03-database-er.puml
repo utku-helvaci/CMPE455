@@ -1,0 +1,94 @@
+@startuml 03-database-er
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+skinparam nodesep 70
+skinparam ranksep 70
+hide circle
+hide methods
+title STMA database: entity-relationship diagram
+
+entity users {
+  * id : varchar(36) <<PK>>
+  --
+  * username : varchar(80) <<unique>>
+  * password_hash : varchar(255)
+  * role : varchar(20)
+  first_name : varchar(80)
+  last_name : varchar(80)
+  school_id : varchar(80)
+  * created_at : timestamp
+}
+
+entity login_sessions {
+  * id : varchar(36) <<PK>>
+  --
+  * user_id : varchar(36) <<FK users>>
+  * token_hash : varchar(64) <<unique>>
+  * expires_at : timestamp
+}
+
+entity relationships {
+  * id : varchar(36) <<PK>>
+  --
+  * student_id : varchar(36) <<FK users>>
+  * evaluator_id : varchar(36) <<FK users>>
+  * active : boolean
+  * created_at : timestamp
+  ..
+  unique (student_id, evaluator_id)
+}
+
+entity public_keys {
+  * id : varchar(36) <<PK>>
+  --
+  * user_id : varchar(36) <<FK users>>
+  * purpose : varchar(20)
+  * version : integer
+  * public_key_pem : varchar(4096)
+  * created_at : timestamp
+  ..
+  unique (user_id, purpose, version)
+}
+
+entity chat_messages {
+  * id : varchar(36) <<PK>>
+  --
+  * relationship_id : varchar(36) <<FK relationships>>
+  * sender_id : varchar(36) <<FK users>>
+  * body : varchar(4000)
+  * created_at : timestamp
+}
+
+entity documents {
+  * id : varchar(36) <<PK>>
+  --
+  * relationship_id : varchar(36) <<FK relationships>>
+  * sender_id : varchar(36) <<FK users>>
+  * filename : varchar(255)
+  * storage_name : varchar(36) <<unique>>
+  * ciphertext_size : integer
+  * iv : binary(8)
+  * wrapped_des_key : binary
+  * recipient_key_id : varchar(36) <<FK public_keys>>
+  * signing_key_id : varchar(36) <<FK public_keys>>
+  * created_at : timestamp
+}
+
+users ||--o{ login_sessions : "user_id"
+users ||--o{ public_keys : "user_id"
+users ||--o{ relationships : "student_id"
+users ||--o{ relationships : "evaluator_id"
+relationships ||--o{ chat_messages : "relationship_id"
+relationships ||--o{ documents : "relationship_id"
+users ||--o{ chat_messages : "sender_id"
+users ||--o{ documents : "sender_id"
+public_keys ||--o{ documents : "recipient_key_id"
+public_keys ||--o{ documents : "signing_key_id"
+
+legend bottom right
+  Each line is a foreign key, labelled with the column that holds it.
+  The "one" side has two bars; the "many" side has a crow's foot.
+endlegend
+@enduml

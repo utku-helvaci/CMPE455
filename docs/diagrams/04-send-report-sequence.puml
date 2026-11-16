@@ -1,0 +1,30 @@
+@startuml 04-send-report-sequence
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+title Sending a report (student to evaluator)
+
+actor Student
+participant "Student's browser" as B
+participant "STMA server" as S
+database "Database" as DB
+collections "File storage" as FS
+
+Student -> B : choose report file
+B -> B : 1. sign file with student's\nsigning PRIVATE key (RSA-PSS, SHA-256)
+B -> B : 2. package = signature length + signature + file
+B -> B : 3. make random 8-byte DES key and 8-byte IV,\nencrypt package (DES-CBC, PKCS#7 padding)
+B -> B : 4. encrypt DES key with evaluator's\nencryption PUBLIC key (RSA-OAEP)
+B -> S : 5. upload ciphertext, IV, wrapped DES key,\nIDs of the two public keys (HTTPS)
+S -> S : check sender is in the relationship,\nkeys belong to the right users, sizes are valid
+S -> FS : save ciphertext under a random name
+S -> DB : insert row into documents
+S --> B : 201 Created
+B --> Student : "Report encrypted, signed,\nand uploaded successfully"
+
+note over S, FS
+  The server never sees the file,
+  the signature or the DES key.
+end note
+@enduml

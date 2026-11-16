@@ -1,0 +1,22 @@
+@startuml 06-document-package
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+title What is uploaded for one report
+
+rectangle "Encrypted with DES-CBC (one random 8-byte key per report)" as CT #EEF3FB {
+  rectangle "Signature length\n4 bytes" as L
+  rectangle "RSA-PSS signature\n384 bytes" as SIG
+  rectangle "Report file\nany size" as F
+  rectangle "Padding\n1 to 8 bytes" as P
+  L -right-> SIG
+  SIG -right-> F
+  F -right-> P
+}
+rectangle "IV\n8 random bytes, not secret" as IV
+rectangle "Wrapped DES key\nDES key encrypted with the receiver's\nRSA public key (RSA-OAEP), 384 bytes" as WK #FBF3E4
+
+L -[hidden]down-> IV
+F -[hidden]down-> WK
+@enduml

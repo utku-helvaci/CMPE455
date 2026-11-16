@@ -1,0 +1,77 @@
+16.10.2026
+CMPE455/CMSE456 Term Project “Online Summer Training Management Application” (15 points)
+Task
+Develop an on-line Summer Training Management Application (STMA) on at least two separate computers providing chatting of the clients (evaluator, student). STMA has two actors: Sysadmin, and Client. Sysadmin is responsible for monitoring STMA server. Clients communicate using DES-encrypted and digitally signed documents (for example, student sends summer training report, evaluator sends evaluation report) which are stored DES-encrypted. Session secret key is exchanged using RSA encryption. RSA keys are periodically updated.
+In this system, clients belong to two sub-roles: Students and Evaluators. They run the application on separate computers to chat and exchange files.
+________________________________________
+It is a team work of 2 people (can also be done individually). Any programming languages and tools can be used. Reports on the Term Project shall be submitted 21.12.2026, 10 am, via Teams (Term Project assignment will be posted later by Lab Coordinator). Late submissions will be penalized 3 points a day. Defense of the projects will be organized by the Lab Coordinator in the period 23.12.2026-30.12.2026.
+The report shall have
+        1. Cover page (University, Department, Course, Semester, Year, City, Country,  Term Project subject, Team members, Lecturer, Lab assistants)
+        2. Outline
+        3. Problem definition (see Task above)
+        4. STMA detailed description
+        5. Description of the tools and security methods used for the STMA implementation (e.g., programming tools, encryption algorithms, hash functions, distributed system organization tools, communication tools, security tools, synchronization tools, database management system tools, web-server tools, etc.)
+        6. Description of STMA implementation in your programming language/operating system
+        6.1. Description of the system architecture, including at least two separate computers
+        6.2. Description of the database structure used for STMA
+        6.3. Description of the implementation of actors: Sysadmin and Client
+        6.4. Description of the data structures used for the secure implementation of Sysadmin and Client
+        6.5. Description of the algorithms used for the secure implementation of the Sysadmin and Client
+        6.6. Description of the codes developed
+        7. Description of the tests conducted and their results, screenshots of them
+        8. Brief installation and usage instructions
+        9. Conclusion
+        10. References
+        11. Appendices with the code developed (shall be referred to when giving explanations required in item 6.6 above. Appendices shall be structured, e.g., Appendix 1. Source code of the STMA)
+Archived files submitted via Teams shall contain all information related to the project (report, design materials, sources, executables, etc.).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+This project description outlines a secure, networked Summer Training Management Application (STMA). It is designed to let students and evaluators chat and exchange official training documents (like reports and evaluations) across different computers while keeping all data highly secure.
+
+System Roles (Actors)
+The system separates administrative oversight from the actual users:
+    • Sysadmin (System Administrator): Responsible strictly for monitoring the STMA server. They ensure the server stays online, track system performance, and monitor traffic, but they do not read user chats or documents.
+    • Client (The Users): In this system, clients belong to two sub-roles: Students and Evaluators. They run the application on separate computers to chat and exchange files.
+
+Document Workflow & Use Cases
+Instead of generic media, the application handles specific workflow documents:
+    • The Student: Uses the client app to chat with their evaluator and upload their Summer Training Report once their internship or training is complete.
+    • The Evaluator: Reviews the submission, chats with the student to give feedback, and uploads the final Evaluation Report.
+
+Core Security Mechanics
+To protect student grades, evaluations, and privacy, the application relies on three cryptographic layers:
+1. Document Privacy (Symmetric Encryption via DES)
+    • What happens: When a student sends a training report or an evaluator sends a grade sheet, the file is encrypted using the Data Encryption Standard (DES) algorithm before leaving the computer.
+    • How it's stored: The files are stored on the server in an encrypted state. Even if a hacker hacks the database or a malicious admin browses the files, the documents are completely unreadable without the secret session key.
+2. Secure Key Exchange (Asymmetric Encryption via RSA)
+    • The Challenge: To decrypt a document, both clients need the same DES secret session key. Sending this key openly across the internet is insecure.
+    • The Solution: The clients use RSA encryption (a public/private key pair) to safely exchange the DES key. The sender encrypts the DES key using the receiver's Public RSA Key. Only the receiver's matching Private RSA Key can unlock it.
+    • Key Rotations: The RSA keys are periodically updated. If a key is somehow stolen months later, older archived documents remain perfectly safe because the keys have already changed.
+3. Authenticity & Verification (Digital Signatures)
+    • Why it's used: It prevents fraud (e.g., a student uploading a fake evaluation report posing as a teacher, or a teacher claiming they never received a report).
+    • How it works: A Digital Signature is attached to each document. It mathematically proves Identity (exactly who uploaded the document) and Integrity (that the report wasn't altered or tampered with after it was signed).
+
+Infrastructure Requirements
+    • Multi-Computer Setup: The application must run on at least two separate physical or virtual machines connected over a network to simulate a real-world client-server environment.
+    • Central Server: A backend server is required to store the encrypted documents, route the chat messages, and give the Sysadmin a dashboard or log view to monitor system health.
+As you begin designing this system, let me know if you would like:
+    • A database schema layout showing how to store users, chats, and encrypted documents.
+    • A diagram or step-by-step description of the document submission and signing sequence.
+    • A note on cryptographic vulnerabilities (such as why modern standards prefer AES over DES for securing documents).

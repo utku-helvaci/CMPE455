@@ -1,0 +1,43 @@
+@startuml 01-use-case
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+left to right direction
+title STMA use cases
+
+actor Student
+actor "Evaluator\n(teacher)" as Evaluator
+actor Sysadmin
+
+rectangle "STMA" {
+  usecase "Register and sign in" as UC1
+  usecase "Chat with partner" as UC2
+  usecase "Generate / rotate RSA keys" as UC3
+  usecase "Send signed,\nDES-encrypted report" as UC4
+  usecase "Verify and download report" as UC5
+  usecase "Add student by School ID" as UC6
+  usecase "End relationship" as UC7
+  usecase "Assign account roles" as UC8
+  usecase "Delete account" as UC9
+  usecase "View server health" as UC10
+}
+
+Student --> UC1
+Student --> UC2
+Student --> UC3
+Student --> UC4
+Student --> UC5
+
+UC1 <-- Evaluator
+UC2 <-- Evaluator
+UC3 <-- Evaluator
+UC4 <-- Evaluator
+UC5 <-- Evaluator
+UC6 <-- Evaluator
+UC7 <-- Evaluator
+
+Sysadmin --> UC8
+Sysadmin --> UC9
+Sysadmin --> UC10
+@enduml

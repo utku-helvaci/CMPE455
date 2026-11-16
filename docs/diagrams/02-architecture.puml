@@ -1,0 +1,44 @@
+@startuml 02-architecture
+skinparam dpi 150
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName DejaVu Sans
+title STMA deployment: one server, browsers on other computers
+
+node "Student computer" as SC {
+  component "Web browser" as SB
+  artifact "Private keys\n(.pem files)" as SK
+}
+node "Evaluator computer" as EC {
+  component "Web browser" as EB
+  artifact "Private keys\n(.pem files)" as EK
+}
+node "Sysadmin computer" as AC {
+  component "Web browser" as AB
+}
+
+node "Server computer (Docker)" as SRV {
+  component "Nginx\nHTTPS reverse proxy\nport 8000" as NG
+  component "STMA app\nFastAPI + Uvicorn" as APP
+  database "PostgreSQL\nusers, relationships,\nkeys, chat, document rows" as DB
+  folder "Encrypted report files\n(ciphertext only)" as FS
+}
+
+SB --> NG : HTTPS
+EB --> NG : HTTPS
+AB --> NG : HTTPS
+NG --> APP : HTTP (internal network)
+APP --> DB : SQL
+APP --> FS : read / write
+
+note bottom of SC
+  Signing, DES encryption and
+  RSA key wrapping run here,
+  in the browser
+end note
+note bottom of SRV
+  Only Nginx is reachable from the network.
+  The server never holds a private key
+  or a readable report.
+end note
+@enduml
