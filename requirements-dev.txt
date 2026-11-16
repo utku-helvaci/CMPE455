@@ -1,0 +1,4 @@
+# Runtime dependencies plus what the test suite needs.
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27

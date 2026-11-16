@@ -27,9 +27,21 @@ Use Python 3.12 or newer. Create a virtual environment and install dependencies:
 
 ```sh
 python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
 ```
+
+`requirements.txt` lists what the server needs to run; `requirements-dev.txt` adds the test tools on top of it.
+
+| Package | Used for |
+| --- | --- |
+| `fastapi` | HTTP API and request validation (brings in Pydantic and Starlette) |
+| `uvicorn` | ASGI server that runs the app |
+| `sqlalchemy` | Database models and queries |
+| `psycopg[binary]` | PostgreSQL driver; not used when running on SQLite |
+| `pycryptodome` | RSA and DES for `stma.crypto` and server-side key and ciphertext validation |
+| `argon2-cffi` | Argon2id password hashing |
+| `pytest`, `httpx` (dev only) | Test suite and FastAPI's test client |
 
 For a quick single-computer run, leave `DATABASE_URL` unset to use a local SQLite database. To use PostgreSQL, create a database and role, then set the connection string (see `.env.example` for its format). `DATABASE_URL` and `STMA_STORAGE_DIR` are read from the process environment.
 
@@ -57,15 +69,21 @@ For a two-computer demonstration, set the server host address reachable from the
 
 ## Headless Docker server on a LAN
 
-The Docker Compose deployment runs the STMA app, PostgreSQL 16, and Nginx as separate containers. It persists the database and encrypted report storage in Docker volumes, publishes HTTPS on port 8000, and redirects HTTP on port 8001 to HTTPS. The app container installs the Python dependencies plus Alembic, `pgspecial`, and PyGreSQL; the Nginx container includes the GeoIP, XSLT, stream, mail, and image-filter modules. STMA itself does not currently use the optional PostgreSQL shell/driver or those extra Nginx modules.
+The Docker Compose deployment runs the STMA app, PostgreSQL 16, and Nginx as separate containers. It persists the database and encrypted report storage in Docker volumes, publishes HTTPS on port 8000, and redirects HTTP on port 8001 to HTTPS. The app container installs only the packages in `requirements.txt`, and the Nginx container is a plain Nginx used as a TLS reverse proxy with no extra modules.
 
-Install Docker Engine or Docker Desktop with the Compose plugin, and OpenSSL. From the project root, run:
+**Linux and macOS:** install Docker Engine or Docker Desktop with the Compose plugin, and OpenSSL. From the project root, run:
 
 ```sh
 ./deploy/start.sh
 ```
 
-The script generates a database password and a local certificate authority, then builds and starts the containers. To use a particular network address instead of automatic detection, run `STMA_LAN_IP=192.168.1.20 ./deploy/start.sh` with the server computer's LAN IP. Create the first Sysadmin account in a terminal:
+**Windows:** install Docker Desktop and start it. Nothing else is needed; the script runs OpenSSL inside a container. Double-click `deploy\start.bat`, or from the project root in PowerShell run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\start.ps1
+```
+
+The script generates a database password and a local certificate authority, then builds and starts the containers. To use a particular network address instead of automatic detection, set the server computer's LAN IP before the first run: `STMA_LAN_IP=192.168.1.20 ./deploy/start.sh`, or in PowerShell `$env:STMA_LAN_IP = "192.168.1.20"` followed by the command above. Create the first Sysadmin account in a terminal (the `docker compose` commands in this section are the same on every operating system):
 
 ```sh
 docker compose --env-file .env.docker run --rm app python -m stma.cli create-admin sysadmin
@@ -77,7 +95,9 @@ To recover a forgotten Docker-deployment Sysadmin password, run:
 docker compose --env-file .env.docker run --rm app python -m stma.cli reset-admin-password sysadmin
 ```
 
-Open `https://<server-lan-ip>:8000/` from the server or another computer on the same trusted LAN. For browser Web Crypto to work, install `deploy/certs/ca.crt` as a trusted certificate authority on each client computer; the CA private key remains on the server and is not mounted into a container. The certificate is valid for the LAN IP chosen at setup. If that address changes, update `STMA_LAN_IP` in `.env.docker` and rerun `./deploy/start.sh`.
+Open `https://<server-lan-ip>:8000/` from the server or another computer on the same trusted LAN. For browser Web Crypto to work, install `deploy/certs/ca.crt` as a trusted certificate authority on each client computer; the CA private key remains on the server and is not mounted into a container. The certificate is valid for the LAN IP chosen at setup. If that address changes, update `STMA_LAN_IP` in `.env.docker` and rerun the start script.
+
+On Windows, `certutil -addstore -user Root deploy\certs\ca.crt` trusts the CA for Chrome and Edge. Firefox keeps its own certificate store: import `ca.crt` under Settings → Privacy & Security → Certificates → View Certificates → Authorities.
 
 The deployment uses a Docker bridge network; PostgreSQL and the app port are not published to the host. Only Nginx is reachable externally. Allow inbound TCP ports 8000 (HTTPS) and, if desired, 8001 (HTTP redirect) in the server's firewall for the trusted LAN only. Do not forward these ports from a router to the public internet. Keep `.env.docker`, `deploy/certs/ca.key`, the database volume, and the encrypted-document volume backed up and restricted. `docker compose --env-file .env.docker down` stops the server without deleting its data; do not use `down -v` unless you intend to permanently remove the database and uploaded files.
 
@@ -118,6 +138,8 @@ The password is a local deployment secret. Do not paste it into chat, screenshot
 The workspace provides SHA-256 public-key fingerprints for users to compare through a trusted channel. Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. Key backup and compromise/revocation procedures remain manual.
 
 ## Tests
+
+Install `requirements-dev.txt` as described under Local development, then run:
 
 ```sh
 pytest
