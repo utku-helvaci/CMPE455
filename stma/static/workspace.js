@@ -29,6 +29,7 @@ const state = {
   relationships: [],
   relationship: null,
   keys: [],
+  documentIds: "",
   pollTimer: null,
   worker: null,
   operationId: 0,
@@ -329,11 +330,26 @@ function renderMessages(messages) {
 async function refreshMessages(relationshipId) {
   if (state.relationship?.id !== relationshipId) return;
   try {
-    const messages = await api(`/api/relationships/${relationshipId}/messages`);
-    if (state.relationship?.id === relationshipId) {
-      setConnectionStatus(true);
-      hideInlineMessage("chat-message");
-      renderMessages(messages);
+    const base = `/api/relationships/${relationshipId}`;
+    const [messages, keys, documentIds] = await Promise.all([
+      api(`${base}/messages`),
+      api(`${base}/keys`),
+      api(`${base}/documents/ids`),
+    ]);
+    if (state.relationship?.id !== relationshipId) return;
+    setConnectionStatus(true);
+    hideInlineMessage("chat-message");
+    renderMessages(messages);
+    // Re-render only on change so in-progress buttons and key download links survive polling.
+    const keysChanged =
+      keys.map((key) => key.id).join(",") !== state.keys.map((key) => key.id).join(",");
+    if (keysChanged) {
+      state.keys = keys;
+      renderKeys();
+    }
+    if (documentIds.join(",") !== state.documentIds) {
+      const documents = await api(`${base}/documents`);
+      if (state.relationship?.id === relationshipId) renderDocuments(documents);
     }
   } catch (error) {
     setConnectionStatus(false);
@@ -366,6 +382,7 @@ function formatBytes(bytes) {
 }
 
 function renderDocuments(documents) {
+  state.documentIds = documents.map((item) => item.id).join(",");
   document.querySelector("#document-count").textContent = String(documents.length);
   documentList.replaceChildren();
   if (documents.length === 0) {
@@ -408,6 +425,7 @@ function renderDocuments(documents) {
       downloadButton.className = "download-button";
       downloadButton.textContent = "Verify & download";
       downloadButton.addEventListener("click", () => receiveDocument(documentRecord, downloadButton));
+      info.append(name, subtitle);
       item.append(icon, info, downloadButton);
       documentList.append(item);
       continue;

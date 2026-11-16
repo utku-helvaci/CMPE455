@@ -697,6 +697,26 @@ def create_app(
         )
 
     @app.get(
+        "/api/relationships/{relationship_id}/documents/ids",
+        response_model=list[str],
+    )
+    def list_document_ids(
+        relationship_id: str,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ) -> list[str]:
+        # Cheap change check for polling clients; the full listing carries ciphertext.
+        relationship = get_relationship(db, relationship_id)
+        require_participant(relationship, user)
+        return list(
+            db.scalars(
+                select(Document.id)
+                .where(Document.relationship_id == relationship_id)
+                .order_by(Document.created_at, Document.id)
+            )
+        )
+
+    @app.get(
         "/api/relationships/{relationship_id}/documents",
         response_model=list[DocumentView],
     )

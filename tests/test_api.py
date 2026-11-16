@@ -317,6 +317,11 @@ def test_registration_login_and_relationship_access(tmp_path):
         )
         assert decrypted == report
         assert base64.b64decode(received["ciphertext_b64"]) == encrypted.ciphertext
+        document_ids = client.get(
+            f"/api/relationships/{relationship_id}/documents/ids",
+            headers=evaluator_headers,
+        )
+        assert document_ids.json() == [received["id"]]
 
         outsider_login = client.post(
             "/api/auth/login",
@@ -333,6 +338,11 @@ def test_registration_login_and_relationship_access(tmp_path):
             headers=outsider_headers,
         )
         assert denied_documents.status_code == 404
+        denied_document_ids = client.get(
+            f"/api/relationships/{relationship_id}/documents/ids",
+            headers=outsider_headers,
+        )
+        assert denied_document_ids.status_code == 404
 
         admin_cannot_read_chat = client.get(
             f"/api/relationships/{relationship_id}/messages",

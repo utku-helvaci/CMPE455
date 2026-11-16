@@ -211,12 +211,26 @@
     return btoa(binary);
   }
 
-  async function importPublicKey(pem, algorithm, usage) {
-    return crypto.subtle.importKey("spki", pemBytes(pem), algorithm, false, [usage]);
+  // Web Crypto failures surface as opaque DOMExceptions ("The operation failed for an
+  // operation-specific reason"), so each step is rewrapped with what the user can act on.
+  async function describe(message, operation) {
+    try {
+      return await operation();
+    } catch {
+      throw new Error(message);
+    }
   }
 
-  async function importPrivateKey(pem, algorithm, usage) {
-    return crypto.subtle.importKey("pkcs8", pemBytes(pem), algorithm, false, [usage]);
+  async function importPublicKey(pem, algorithm, usage, message) {
+    return describe(message, () =>
+      crypto.subtle.importKey("spki", pemBytes(pem), algorithm, false, [usage]),
+    );
+  }
+
+  async function importPrivateKey(pem, algorithm, usage, message) {
+    return describe(message, () =>
+      crypto.subtle.importKey("pkcs8", pemBytes(pem), algorithm, false, [usage]),
+    );
   }
 
   async function encryptDocument({
@@ -230,23 +244,24 @@
       signingPrivatePem,
       { name: "RSA-PSS", hash: "SHA-256" },
       "sign",
+      "The loaded signing private key is not a valid RSA private key file. In the Security keys tab, load the “signing-private” PEM file you downloaded when generating keys.",
     );
     const recipientKey = await importPublicKey(
       recipientPublicPem,
       { name: "RSA-OAEP", hash: "SHA-256" },
       "encrypt",
+      "The recipient’s published encryption key is invalid. Ask them to generate new keys.",
     );
     const signature = new Uint8Array(
-      await crypto.subtle.sign(
-        { name: "RSA-PSS", saltLength: 32 },
-        signingKey,
-        documentBytes,
+      await describe("The report could not be signed with the loaded signing private key.", () =>
+        crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, signingKey, documentBytes),
       ),
     );
     const signingPublicKey = await importPublicKey(
       signingPublicPem,
       { name: "RSA-PSS", hash: "SHA-256" },
       "verify",
+      "Your published signing key is invalid. Generate new keys in the Security keys tab.",
     );
     const signingKeyMatches = await crypto.subtle.verify(
       { name: "RSA-PSS", saltLength: 32 },
@@ -255,7 +270,9 @@
       documentBytes,
     );
     if (!signingKeyMatches) {
-      throw new Error("The signing private key does not match your published signing key.");
+      throw new Error(
+        "The loaded signing private key does not match your latest published signing key. Load the “signing-private” file from your most recent key generation (not the encryption one).",
+      );
     }
     const payload = new Uint8Array(4 + signature.length + documentBytes.length);
     new DataView(payload.buffer).setUint32(0, signature.length);
@@ -266,7 +283,9 @@
     const iv = crypto.getRandomValues(new Uint8Array(8));
     const ciphertext = desCbcEncrypt(payload, desKey, iv);
     const wrappedKey = new Uint8Array(
-      await crypto.subtle.encrypt({ name: "RSA-OAEP" }, recipientKey, desKey),
+      await describe("The report key could not be encrypted for the recipient.", () =>
+        crypto.subtle.encrypt({ name: "RSA-OAEP" }, recipientKey, desKey),
+      ),
     );
     return {
       ciphertext_b64: encodeBase64(ciphertext),
@@ -286,14 +305,19 @@
       recipientPrivatePem,
       { name: "RSA-OAEP", hash: "SHA-256" },
       "decrypt",
+      "The loaded decryption private key is not a valid RSA private key file. In the Security keys tab, load the “encryption-private” PEM file you downloaded when generating keys.",
     );
     const signerKey = await importPublicKey(
       signerPublicPem,
       { name: "RSA-PSS", hash: "SHA-256" },
       "verify",
+      "The sender’s published signing key is invalid, so the report cannot be verified.",
     );
     const desKey = new Uint8Array(
-      await crypto.subtle.decrypt({ name: "RSA-OAEP" }, recipientKey, wrappedKey),
+      await describe(
+        "This report cannot be decrypted with the loaded decryption private key. It was encrypted for a different key: load the “encryption-private” file (not the signing one) that matches the key version shown on the report.",
+        () => crypto.subtle.decrypt({ name: "RSA-OAEP" }, recipientKey, wrappedKey),
+      ),
     );
     if (desKey.length !== 8 || iv.length !== 8) {
       throw new Error("The stored document has an invalid DES key or initialization vector.");

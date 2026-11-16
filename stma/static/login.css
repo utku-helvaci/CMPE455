@@ -940,6 +940,12 @@ button:disabled {
   font-size: 11px;
 }
 
+.documents-panel,
+.keys-panel {
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+
 .security-note {
   margin: 0 0 14px;
   padding: 11px 13px;
