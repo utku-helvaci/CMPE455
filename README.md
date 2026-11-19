@@ -103,7 +103,9 @@ The deployment uses a Docker bridge network; PostgreSQL and the app port are not
 
 ### View the Docker database with HeidiSQL
 
-The PostgreSQL port is intentionally not exposed on the LAN. To connect HeidiSQL on the Docker host, run this temporary relay from the project directory and leave the terminal open:
+The PostgreSQL port is intentionally not exposed on the LAN. To connect HeidiSQL on the Docker host, start a temporary relay and leave its window open: run `./deploy/expose.sh`, or on Windows double-click `deploy\expose.bat`.
+
+The scripts run the following command, which you can also paste from the project directory:
 
 ```sh
 docker run --rm --name stma-db-viewer \
