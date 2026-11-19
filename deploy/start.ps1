@@ -27,8 +27,13 @@ function Write-UnixFile([string]$path, [string[]]$lines) {
     [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+# Windows PowerShell 5.1 turns redirected stderr into a terminating error under "Stop",
+# which would hide the friendly message below.
+$ErrorActionPreference = "Continue"
 docker info *> $null
-if ($LASTEXITCODE -ne 0) {
+$dockerRunning = $LASTEXITCODE -eq 0
+$ErrorActionPreference = "Stop"
+if (-not $dockerRunning) {
     throw "Docker is not running. Start Docker Desktop, wait until it is ready, and run this script again."
 }
 

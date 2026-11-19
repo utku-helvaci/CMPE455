@@ -10,3 +10,4 @@ storage
 .env
 .env.docker
 deploy/certs
+encrypted-export

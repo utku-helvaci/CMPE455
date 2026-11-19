@@ -131,6 +131,30 @@ In HeidiSQL, create a **PostgreSQL** session with:
 
 The password is a local deployment secret. Do not paste it into chat, screenshots, or this README, and do not commit `.env.docker`. The relay binds only to localhost; it does not expose PostgreSQL to other computers. Stop it with **Ctrl+C** when finished. To connect from a different computer, use an SSH tunnel to the Docker host rather than publishing PostgreSQL to the LAN.
 
+### Show the stored encrypted reports
+
+Uploaded reports are kept in the `stma_documents` Docker volume, mounted at `/app/storage` in the app container. Each file is the DES ciphertext exactly as the browser uploaded it, named by the `storage_name` column of the `documents` table. To copy them out while STMA is running:
+
+```sh
+./deploy/export-documents.sh
+```
+
+On Windows, double-click `deploy\export-documents.bat`, or run `powershell -ExecutionPolicy Bypass -File deploy\export-documents.ps1`.
+
+This creates `encrypted-export/<date_time>/` in the project folder with:
+
+- `files/`: the stored files, byte for byte, under their stored names
+- `index.csv`: one row per file with its original name, sender, recipient, encrypted size, the key versions used, the IV and the upload time
+
+The script also prints the first 32 bytes of each file. Nothing is decrypted: opening an exported file in a text editor shows unreadable bytes, and only the recipient can read the report, through the app, with their private key. `encrypted-export/` is ignored by Git.
+
+To look inside the container directly instead, for example during a live demo:
+
+```sh
+docker compose --env-file .env.docker exec app ls -l /app/storage
+docker compose --env-file .env.docker exec app od -c -N 64 /app/storage/<stored file name>
+```
+
 ## Initial workflow
 
 1. Students and teachers register at `/` with name, surname, school ID, and a password of at least 12 characters. No keys or key files are needed during registration.
