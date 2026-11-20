@@ -47,6 +47,8 @@ from stma.security import (
 
 bearer_scheme = HTTPBearer(auto_error=False)
 SAFE_FILENAME = re.compile(r"^[^/\\\x00-\x1f\x7f]+$")
+# A message is at most 4000 characters (16000 UTF-8 bytes) plus its signature and padding.
+MAX_MESSAGE_CIPHERTEXT_BYTES = 20 * 1024
 
 
 def _decode_b64(value: str, field: str) -> bytes:
@@ -54,6 +56,52 @@ def _decode_b64(value: str, field: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"{field} must be valid base64.") from exc
+
+
+def _encode_b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def _check_des_ciphertext(ciphertext: bytes, iv: bytes, max_bytes: int, item: str) -> None:
+    if not ciphertext or len(ciphertext) % DES.block_size:
+        raise HTTPException(status_code=422, detail="Ciphertext must contain complete DES blocks.")
+    if len(ciphertext) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Encrypted {item} exceeds the size limit.")
+    if len(iv) != DES.block_size:
+        raise HTTPException(status_code=422, detail="DES-CBC IV must be 8 bytes.")
+
+
+def _require_key(db: Session, key_id: str, owner_id: str, purpose: str, detail: str) -> PublicKey:
+    key = db.get(PublicKey, key_id)
+    if key is None or key.user_id != owner_id or key.purpose != purpose:
+        raise HTTPException(status_code=422, detail=detail)
+    return key
+
+
+def _require_wrapped_key_size(wrapped_key: bytes, key: PublicKey, detail: str) -> None:
+    # RSA-OAEP output is exactly as long as the RSA modulus of the key it was made with.
+    try:
+        modulus_bytes = RSA.import_key(key.public_key_pem).size_in_bytes()
+    except (ValueError, TypeError, IndexError) as exc:
+        raise HTTPException(status_code=422, detail=detail) from exc
+    if len(wrapped_key) != modulus_bytes:
+        raise HTTPException(status_code=422, detail=detail)
+
+
+def _message_view(record: ChatMessage) -> MessageView:
+    return MessageView(
+        id=record.id,
+        relationship_id=record.relationship_id,
+        sender_id=record.sender_id,
+        ciphertext_b64=_encode_b64(record.ciphertext),
+        iv_b64=_encode_b64(record.iv),
+        wrapped_des_key_b64=_encode_b64(record.wrapped_des_key),
+        sender_wrapped_des_key_b64=_encode_b64(record.sender_wrapped_des_key),
+        recipient_key_id=record.recipient_key_id,
+        sender_key_id=record.sender_key_id,
+        signing_key_id=record.signing_key_id,
+        created_at=record.created_at,
+    )
 
 
 def create_app(
@@ -313,6 +361,14 @@ def create_app(
         message_filters = [ChatMessage.sender_id == target.id]
         if relationship_ids:
             message_filters.append(ChatMessage.relationship_id.in_(relationship_ids))
+        if public_key_ids:
+            message_filters.extend(
+                [
+                    ChatMessage.recipient_key_id.in_(public_key_ids),
+                    ChatMessage.sender_key_id.in_(public_key_ids),
+                    ChatMessage.signing_key_id.in_(public_key_ids),
+                ]
+            )
         for record in documents:
             db.delete(record)
         for message in db.scalars(select(ChatMessage).where(or_(*message_filters))):
@@ -569,18 +625,54 @@ def create_app(
         payload: MessageCreate,
         user: User = Depends(current_user),
         db: Session = Depends(get_db),
-    ) -> ChatMessage:
+    ) -> MessageView:
         relationship = get_relationship(db, relationship_id)
-        require_participant(relationship, user)
+        recipient_id = counterpart_id(relationship, user)
+        ciphertext = _decode_b64(payload.ciphertext_b64, "ciphertext")
+        iv = _decode_b64(payload.iv_b64, "iv")
+        wrapped_key = _decode_b64(payload.wrapped_des_key_b64, "wrapped_des_key")
+        sender_wrapped_key = _decode_b64(
+            payload.sender_wrapped_des_key_b64, "sender_wrapped_des_key"
+        )
+        _check_des_ciphertext(ciphertext, iv, MAX_MESSAGE_CIPHERTEXT_BYTES, "message")
+
+        recipient_key = _require_key(
+            db,
+            payload.recipient_key_id,
+            recipient_id,
+            "encryption",
+            "Recipient encryption key is invalid.",
+        )
+        sender_key = _require_key(
+            db, payload.sender_key_id, user.id, "encryption", "Sender encryption key is invalid."
+        )
+        signing_key = _require_key(
+            db, payload.signing_key_id, user.id, "signing", "Sender signing key is invalid."
+        )
+        _require_wrapped_key_size(
+            wrapped_key, recipient_key, "Wrapped key is not valid for the selected recipient key."
+        )
+        _require_wrapped_key_size(
+            sender_wrapped_key,
+            sender_key,
+            "Sender's wrapped key is not valid for the selected sender key.",
+        )
+
         message = ChatMessage(
             relationship_id=relationship.id,
             sender_id=user.id,
-            body=payload.body,
+            ciphertext=ciphertext,
+            iv=iv,
+            wrapped_des_key=wrapped_key,
+            sender_wrapped_des_key=sender_wrapped_key,
+            recipient_key_id=recipient_key.id,
+            sender_key_id=sender_key.id,
+            signing_key_id=signing_key.id,
         )
         db.add(message)
         db.commit()
         db.refresh(message)
-        return message
+        return _message_view(message)
 
     @app.get(
         "/api/relationships/{relationship_id}/messages",
@@ -590,16 +682,17 @@ def create_app(
         relationship_id: str,
         user: User = Depends(current_user),
         db: Session = Depends(get_db),
-    ) -> list[ChatMessage]:
+    ) -> list[MessageView]:
         relationship = get_relationship(db, relationship_id)
         require_participant(relationship, user)
-        return list(
-            db.scalars(
+        return [
+            _message_view(message)
+            for message in db.scalars(
                 select(ChatMessage)
                 .where(ChatMessage.relationship_id == relationship_id)
                 .order_by(ChatMessage.created_at, ChatMessage.id)
             )
-        )
+        ]
 
     @app.post(
         "/api/relationships/{relationship_id}/documents",
@@ -620,43 +713,21 @@ def create_app(
         ciphertext = _decode_b64(payload.ciphertext_b64, "ciphertext")
         iv = _decode_b64(payload.iv_b64, "iv")
         wrapped_key = _decode_b64(payload.wrapped_des_key_b64, "wrapped_des_key")
-        if not ciphertext or len(ciphertext) % DES.block_size:
-            raise HTTPException(
-                status_code=422, detail="Ciphertext must contain complete DES blocks."
-            )
-        if len(ciphertext) > request.app.state.max_document_bytes:
-            raise HTTPException(
-                status_code=413, detail="Encrypted document exceeds the size limit."
-            )
-        if len(iv) != DES.block_size:
-            raise HTTPException(status_code=422, detail="DES-CBC IV must be 8 bytes.")
+        _check_des_ciphertext(ciphertext, iv, request.app.state.max_document_bytes, "document")
 
-        recipient_key = db.get(PublicKey, payload.recipient_key_id)
-        signing_key = db.get(PublicKey, payload.signing_key_id)
-        if (
-            recipient_key is None
-            or recipient_key.user_id != recipient_id
-            or recipient_key.purpose != "encryption"
-        ):
-            raise HTTPException(status_code=422, detail="Recipient encryption key is invalid.")
-        if (
-            signing_key is None
-            or signing_key.user_id != user.id
-            or signing_key.purpose != "signing"
-        ):
-            raise HTTPException(status_code=422, detail="Sender signing key is invalid.")
-        try:
-            wrapped = RSA.import_key(recipient_key.public_key_pem)
-            if len(wrapped_key) != wrapped.size_in_bytes():
-                raise ValueError
-        except (ValueError, TypeError, IndexError) as exc:
-            raise HTTPException(
-                status_code=422, detail="Wrapped key is not valid for the selected recipient key."
-            ) from exc
-        if len(wrapped_key) != wrapped.size_in_bytes():
-            raise HTTPException(
-                status_code=422, detail="Wrapped key is not valid for the selected recipient key."
-            )
+        recipient_key = _require_key(
+            db,
+            payload.recipient_key_id,
+            recipient_id,
+            "encryption",
+            "Recipient encryption key is invalid.",
+        )
+        signing_key = _require_key(
+            db, payload.signing_key_id, user.id, "signing", "Sender signing key is invalid."
+        )
+        _require_wrapped_key_size(
+            wrapped_key, recipient_key, "Wrapped key is not valid for the selected recipient key."
+        )
 
         storage_name = str(uuid4())
         storage_path = request.app.state.storage_dir / storage_name

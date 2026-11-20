@@ -1,11 +1,46 @@
 import base64
 
+import pytest
 from fastapi.testclient import TestClient
 
-from stma.crypto import decrypt_and_verify_document, encrypt_document, generate_rsa_key_pair
-from stma.main import create_app
+from stma.crypto import (
+    EncryptedMessage,
+    decrypt_and_verify_document,
+    decrypt_and_verify_message,
+    encrypt_document,
+    encrypt_message,
+    generate_rsa_key_pair,
+)
+from stma.main import MAX_MESSAGE_CIPHERTEXT_BYTES, create_app
 from stma.models import ChatMessage, Document, LoginSession, PublicKey, Relationship, User
 from stma.security import hash_password
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def message_payload(
+    sealed: EncryptedMessage, recipient_key_id: str, sender_key_id: str, signing_key_id: str
+) -> dict[str, str]:
+    return {
+        "ciphertext_b64": b64(sealed.ciphertext),
+        "iv_b64": b64(sealed.iv),
+        "wrapped_des_key_b64": b64(sealed.wrapped_key),
+        "sender_wrapped_des_key_b64": b64(sealed.sender_wrapped_key),
+        "recipient_key_id": recipient_key_id,
+        "sender_key_id": sender_key_id,
+        "signing_key_id": signing_key_id,
+    }
+
+
+def received_message(view: dict) -> EncryptedMessage:
+    return EncryptedMessage(
+        iv=base64.b64decode(view["iv_b64"]),
+        ciphertext=base64.b64decode(view["ciphertext_b64"]),
+        wrapped_key=base64.b64decode(view["wrapped_des_key_b64"]),
+        sender_wrapped_key=base64.b64decode(view["sender_wrapped_des_key_b64"]),
+    )
 
 
 def test_registration_login_and_relationship_access(tmp_path):
@@ -212,13 +247,62 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert student_relationships.json()[0]["evaluator_username"] == "teacher123"
         assert student_relationships.json()[0]["evaluator_name"] == "Terry Teacher"
 
+        signing_private, signing_public = generate_rsa_key_pair(2048)
+        recipient_private, recipient_public = generate_rsa_key_pair(2048)
+        _, student_encryption_public = generate_rsa_key_pair(2048)
+        signing_key = client.post(
+            f"/api/relationships/{relationship_id}/keys",
+            headers=student_headers,
+            json={
+                "purpose": "signing",
+                "public_key_pem": signing_public.decode("ascii"),
+            },
+        )
+        encryption_key = client.post(
+            f"/api/relationships/{relationship_id}/keys",
+            headers=evaluator_headers,
+            json={
+                "purpose": "encryption",
+                "public_key_pem": recipient_public.decode("ascii"),
+            },
+        )
+        student_encryption_key = client.post(
+            f"/api/relationships/{relationship_id}/keys",
+            headers=student_headers,
+            json={
+                "purpose": "encryption",
+                "public_key_pem": student_encryption_public.decode("ascii"),
+            },
+        )
+        assert signing_key.status_code == encryption_key.status_code == 201
+        assert student_encryption_key.status_code == 201
+
+        sealed = encrypt_message(
+            "Hello, evaluator.", signing_private, recipient_public, student_encryption_public
+        )
         message = client.post(
             f"/api/relationships/{relationship_id}/messages",
             headers=student_headers,
-            json={"body": "Hello, evaluator."},
+            json=message_payload(
+                sealed,
+                encryption_key.json()["id"],
+                student_encryption_key.json()["id"],
+                signing_key.json()["id"],
+            ),
         )
         assert message.status_code == 201
-        assert message.json()["body"] == "Hello, evaluator."
+        assert "body" not in message.json()
+        listed = client.get(
+            f"/api/relationships/{relationship_id}/messages",
+            headers=evaluator_headers,
+        ).json()
+        assert [item["id"] for item in listed] == [message.json()["id"]]
+        assert (
+            decrypt_and_verify_message(
+                received_message(listed[0]), recipient_private, signing_public
+            )
+            == "Hello, evaluator."
+        )
 
         disown_denied = client.delete(
             f"/api/relationships/{relationship_id}",
@@ -240,7 +324,7 @@ def test_registration_login_and_relationship_access(tmp_path):
         assert client.get("/api/relationships", headers=student_headers).json() == []
         with app.state.session_factory() as db:
             retained_message = db.query(ChatMessage).filter_by(id=message.json()["id"]).one()
-            assert retained_message.body == "Hello, evaluator."
+            assert retained_message.ciphertext == sealed.ciphertext
             assert db.get(Relationship, relationship_id).active is False
 
         rejoined = client.post(
@@ -255,25 +339,6 @@ def test_registration_login_and_relationship_access(tmp_path):
             == relationship_id
         )
 
-        signing_private, signing_public = generate_rsa_key_pair(2048)
-        recipient_private, recipient_public = generate_rsa_key_pair(2048)
-        signing_key = client.post(
-            f"/api/relationships/{relationship_id}/keys",
-            headers=student_headers,
-            json={
-                "purpose": "signing",
-                "public_key_pem": signing_public.decode("ascii"),
-            },
-        )
-        encryption_key = client.post(
-            f"/api/relationships/{relationship_id}/keys",
-            headers=evaluator_headers,
-            json={
-                "purpose": "encryption",
-                "public_key_pem": recipient_public.decode("ascii"),
-            },
-        )
-        assert signing_key.status_code == encryption_key.status_code == 201
         rotated_key = client.post(
             f"/api/relationships/{relationship_id}/keys",
             headers=evaluator_headers,
@@ -415,3 +480,173 @@ def test_login_logout_and_session_revocation(tmp_path):
             assert client.post("/api/auth/logout", headers=headers).status_code == 204
             assert client.get("/api/me", headers=headers).status_code == 401
             assert client.post("/api/auth/logout", headers=headers).status_code == 401
+
+
+@pytest.fixture(scope="module")
+def chat_keys():
+    return {
+        name: generate_rsa_key_pair(2048)
+        for name in (
+            "student_signing",
+            "student_encryption",
+            "teacher_signing",
+            "teacher_encryption",
+        )
+    }
+
+
+def test_chat_messages_are_end_to_end_encrypted(tmp_path, chat_keys):
+    database_path = tmp_path / "chat.db"
+    app = create_app(database_url=f"sqlite:///{database_path}", storage_dir=tmp_path / "encrypted")
+    with app.state.session_factory.begin() as db:
+        for username, role in (
+            ("sysadmin", "sysadmin"),
+            ("student1", "student"),
+            ("teacher1", "evaluator"),
+            ("outsider1", "student"),
+        ):
+            db.add(
+                User(
+                    username=username,
+                    school_id=None if role == "sysadmin" else username,
+                    password_hash=hash_password(f"{username} password long"),
+                    role=role,
+                )
+            )
+
+    with TestClient(app) as client:
+        headers = {}
+        for username in ("sysadmin", "student1", "teacher1", "outsider1"):
+            login = client.post(
+                "/api/auth/login",
+                json={"username": username, "password": f"{username} password long"},
+            )
+            headers[username] = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        relationship = client.post(
+            "/api/relationships", headers=headers["teacher1"], json={"school_id": "student1"}
+        )
+        base = f"/api/relationships/{relationship.json()['id']}"
+
+        key_ids = {}
+        for name, owner in (
+            ("student_signing", "student1"),
+            ("student_encryption", "student1"),
+            ("teacher_signing", "teacher1"),
+            ("teacher_encryption", "teacher1"),
+        ):
+            published = client.post(
+                f"{base}/keys",
+                headers=headers[owner],
+                json={
+                    "purpose": name.split("_")[1],
+                    "public_key_pem": chat_keys[name][1].decode("ascii"),
+                },
+            )
+            assert published.status_code == 201
+            key_ids[name] = published.json()["id"]
+
+        def private(name: str) -> bytes:
+            return chat_keys[name][0]
+
+        def public(name: str) -> bytes:
+            return chat_keys[name][1]
+
+        question = "Hocam, staj raporum hazır mı? ğüşıöç"
+        answer = "Yes, your report is approved."
+        from_student = encrypt_message(
+            question,
+            private("student_signing"),
+            public("teacher_encryption"),
+            public("student_encryption"),
+        )
+        student_payload = message_payload(
+            from_student,
+            key_ids["teacher_encryption"],
+            key_ids["student_encryption"],
+            key_ids["student_signing"],
+        )
+        sent = client.post(f"{base}/messages", headers=headers["student1"], json=student_payload)
+        assert sent.status_code == 201
+        from_teacher = encrypt_message(
+            answer,
+            private("teacher_signing"),
+            public("student_encryption"),
+            public("teacher_encryption"),
+        )
+        reply = client.post(
+            f"{base}/messages",
+            headers=headers["teacher1"],
+            json=message_payload(
+                from_teacher,
+                key_ids["student_encryption"],
+                key_ids["teacher_encryption"],
+                key_ids["teacher_signing"],
+            ),
+        )
+        assert reply.status_code == 201
+
+        for reader in ("student1", "teacher1"):
+            listed = client.get(f"{base}/messages", headers=headers[reader])
+            assert listed.status_code == 200
+            assert [item["id"] for item in listed.json()] == [sent.json()["id"], reply.json()["id"]]
+        student_view, teacher_view = (
+            received_message(item)
+            for item in client.get(f"{base}/messages", headers=headers["student1"]).json()
+        )
+        # Each participant opens the partner's message with their own key, and their own
+        # message through the copy of the DES key wrapped for themselves.
+        assert (
+            decrypt_and_verify_message(
+                student_view, private("teacher_encryption"), public("student_signing")
+            )
+            == question
+        )
+        assert (
+            decrypt_and_verify_message(
+                student_view,
+                private("student_encryption"),
+                public("student_signing"),
+                own_copy=True,
+            )
+            == question
+        )
+        assert (
+            decrypt_and_verify_message(
+                teacher_view, private("student_encryption"), public("teacher_signing")
+            )
+            == answer
+        )
+
+        def rejected(changes: dict, sender: str = "student1") -> int:
+            return client.post(
+                f"{base}/messages", headers=headers[sender], json={**student_payload, **changes}
+            ).status_code
+
+        assert rejected({"recipient_key_id": key_ids["student_encryption"]}) == 422
+        assert rejected({"sender_key_id": key_ids["teacher_encryption"]}) == 422
+        assert rejected({"signing_key_id": key_ids["student_encryption"]}) == 422
+        assert rejected({"iv_b64": b64(from_student.iv[:7])}) == 422
+        assert rejected({"ciphertext_b64": b64(from_student.ciphertext[:-1])}) == 422
+        assert rejected({"wrapped_des_key_b64": b64(from_student.wrapped_key[:-1])}) == 422
+        assert (
+            rejected({"sender_wrapped_des_key_b64": b64(from_student.sender_wrapped_key[1:])})
+            == 422
+        )
+        assert rejected({"ciphertext_b64": "not base64!"}) == 422
+        assert rejected({"ciphertext_b64": b64(bytes(MAX_MESSAGE_CIPHERTEXT_BYTES + 8))}) == 413
+        assert (
+            client.post(
+                f"{base}/messages", headers=headers["student1"], json={"body": "plain text"}
+            ).status_code
+            == 422
+        )
+        assert rejected({}, sender="outsider1") == 404
+        assert rejected({}, sender="sysadmin") == 404
+        assert client.get(f"{base}/messages", headers=headers["sysadmin"]).status_code == 404
+
+    with app.state.session_factory() as db:
+        assert db.query(ChatMessage).count() == 2
+    app.state.engine.dispose()
+    stored = database_path.read_bytes()
+    for text in (question, answer):
+        assert text.encode("utf-8") not in stored

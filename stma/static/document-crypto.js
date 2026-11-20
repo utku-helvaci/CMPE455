@@ -211,55 +211,81 @@
     return btoa(binary);
   }
 
-  // Web Crypto failures surface as opaque DOMExceptions ("The operation failed for an
-  // operation-specific reason"), so each step is rewrapped with what the user can act on.
-  async function describe(message, operation) {
-    try {
-      return await operation();
-    } catch {
-      throw new Error(message);
+  // Failures carry a code so the page can explain them in context (a chat bubble needs a
+  // shorter text than a report download), while the message stays readable on its own.
+  class CryptoFailure extends Error {
+    constructor(message, code) {
+      super(message);
+      this.code = code;
     }
   }
 
-  async function importPublicKey(pem, algorithm, usage, message) {
-    return describe(message, () =>
+  // Web Crypto failures surface as opaque DOMExceptions ("The operation failed for an
+  // operation-specific reason"), so each step is rewrapped with what the user can act on.
+  async function describe(message, code, operation) {
+    try {
+      return await operation();
+    } catch {
+      throw new CryptoFailure(message, code);
+    }
+  }
+
+  async function importPublicKey(pem, algorithm, usage, message, code = "public-key") {
+    return describe(message, code, () =>
       crypto.subtle.importKey("spki", pemBytes(pem), algorithm, false, [usage]),
     );
   }
 
   async function importPrivateKey(pem, algorithm, usage, message) {
-    return describe(message, () =>
+    return describe(message, "private-key", () =>
       crypto.subtle.importKey("pkcs8", pemBytes(pem), algorithm, false, [usage]),
     );
   }
 
-  async function encryptDocument({
-    document,
+  const PSS = { name: "RSA-PSS", hash: "SHA-256" };
+  const OAEP = { name: "RSA-OAEP", hash: "SHA-256" };
+
+  // The scheme shared by reports and chat messages:
+  // 1. sign the data with the sender's signing private key (RSA-PSS, SHA-256)
+  // 2. package = 4-byte signature length + signature + data
+  // 3. encrypt the package with a fresh random DES key and IV (DES-CBC, PKCS#7 padding)
+  // 4. wrap the DES key with RSA-OAEP: for the recipient, and for chat also for the sender
+  async function signAndEncrypt({
+    data,
     signingPrivatePem,
     signingPublicPem,
     recipientPublicPem,
+    senderPublicPem,
+    item,
   }) {
-    const documentBytes = new Uint8Array(document);
     const signingKey = await importPrivateKey(
       signingPrivatePem,
-      { name: "RSA-PSS", hash: "SHA-256" },
+      PSS,
       "sign",
       "The loaded signing private key is not a valid RSA private key file. In the Security keys tab, load the “signing-private” PEM file you downloaded when generating keys.",
     );
     const recipientKey = await importPublicKey(
       recipientPublicPem,
-      { name: "RSA-OAEP", hash: "SHA-256" },
+      OAEP,
       "encrypt",
       "The recipient’s published encryption key is invalid. Ask them to generate new keys.",
     );
+    const senderKey = senderPublicPem
+      ? await importPublicKey(
+          senderPublicPem,
+          OAEP,
+          "encrypt",
+          "Your published encryption key is invalid. Generate new keys in the Security keys tab.",
+        )
+      : null;
     const signature = new Uint8Array(
-      await describe("The report could not be signed with the loaded signing private key.", () =>
-        crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, signingKey, documentBytes),
+      await describe(`The ${item} could not be signed with the loaded signing private key.`, "sign", () =>
+        crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, signingKey, data),
       ),
     );
     const signingPublicKey = await importPublicKey(
       signingPublicPem,
-      { name: "RSA-PSS", hash: "SHA-256" },
+      PSS,
       "verify",
       "Your published signing key is invalid. Generate new keys in the Security keys tab.",
     );
@@ -267,81 +293,90 @@
       { name: "RSA-PSS", saltLength: 32 },
       signingPublicKey,
       signature,
-      documentBytes,
+      data,
     );
     if (!signingKeyMatches) {
-      throw new Error(
+      throw new CryptoFailure(
         "The loaded signing private key does not match your latest published signing key. Load the “signing-private” file from your most recent key generation (not the encryption one).",
+        "signing-key-mismatch",
       );
     }
-    const payload = new Uint8Array(4 + signature.length + documentBytes.length);
+    const payload = new Uint8Array(4 + signature.length + data.length);
     new DataView(payload.buffer).setUint32(0, signature.length);
     payload.set(signature, 4);
-    payload.set(documentBytes, 4 + signature.length);
+    payload.set(data, 4 + signature.length);
 
     const desKey = crypto.getRandomValues(new Uint8Array(8));
     const iv = crypto.getRandomValues(new Uint8Array(8));
     const ciphertext = desCbcEncrypt(payload, desKey, iv);
-    const wrappedKey = new Uint8Array(
-      await describe("The report key could not be encrypted for the recipient.", () =>
-        crypto.subtle.encrypt({ name: "RSA-OAEP" }, recipientKey, desKey),
-      ),
-    );
-    return {
+    const wrapFor = async (key) =>
+      new Uint8Array(
+        await describe(`The ${item} key could not be encrypted with RSA.`, "wrap", () =>
+          crypto.subtle.encrypt({ name: "RSA-OAEP" }, key, desKey),
+        ),
+      );
+    const sealed = {
       ciphertext_b64: encodeBase64(ciphertext),
       iv_b64: encodeBase64(iv),
-      wrapped_des_key_b64: encodeBase64(wrappedKey),
+      wrapped_des_key_b64: encodeBase64(await wrapFor(recipientKey)),
     };
+    if (senderKey) sealed.sender_wrapped_des_key_b64 = encodeBase64(await wrapFor(senderKey));
+    return sealed;
   }
 
-  async function decryptDocument({
-    ciphertext,
-    iv,
-    wrappedKey,
-    recipientPrivatePem,
-    signerPublicPem,
-  }) {
-    const recipientKey = await importPrivateKey(
-      recipientPrivatePem,
-      { name: "RSA-OAEP", hash: "SHA-256" },
+  // The reverse: unwrap the DES key with the reader's encryption private key, decrypt,
+  // split the package, and only return the data if the sender's signature is valid.
+  async function decryptAndVerify({ ciphertext, iv, wrappedKey, privatePem, signerPublicPem, item }) {
+    const privateKey = await importPrivateKey(
+      privatePem,
+      OAEP,
       "decrypt",
       "The loaded decryption private key is not a valid RSA private key file. In the Security keys tab, load the “encryption-private” PEM file you downloaded when generating keys.",
     );
     const signerKey = await importPublicKey(
       signerPublicPem,
-      { name: "RSA-PSS", hash: "SHA-256" },
+      PSS,
       "verify",
-      "The sender’s published signing key is invalid, so the report cannot be verified.",
+      `The sender’s published signing key is invalid, so the ${item} cannot be verified.`,
+      "signer-key",
     );
     const desKey = new Uint8Array(
       await describe(
-        "This report cannot be decrypted with the loaded decryption private key. It was encrypted for a different key: load the “encryption-private” file (not the signing one) that matches the key version shown on the report.",
-        () => crypto.subtle.decrypt({ name: "RSA-OAEP" }, recipientKey, wrappedKey),
+        `This ${item} cannot be decrypted with the loaded decryption private key. It was encrypted for a different key: load the “encryption-private” file (not the signing one) that matches the key version shown on the ${item}.`,
+        "wrong-key",
+        () => crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, wrappedKey),
       ),
     );
-    if (desKey.length !== 8 || iv.length !== 8) {
-      throw new Error("The stored document has an invalid DES key or initialization vector.");
+    const damaged = () => new CryptoFailure(`The ${item} is damaged and cannot be decrypted.`, "damaged");
+    if (desKey.length !== 8 || iv.length !== 8) throw damaged();
+    let payload;
+    try {
+      payload = desCbcDecrypt(ciphertext, desKey, iv);
+    } catch {
+      throw damaged();
     }
-    const payload = desCbcDecrypt(ciphertext, desKey, iv);
-    if (payload.length < 4) throw new Error("The signed document is malformed.");
+    if (payload.length < 4) throw damaged();
     const signatureSize = new DataView(
       payload.buffer,
       payload.byteOffset,
       payload.byteLength,
     ).getUint32(0);
-    if (signatureSize === 0 || signatureSize + 4 > payload.length) {
-      throw new Error("The signed document is malformed.");
-    }
+    if (signatureSize === 0 || signatureSize + 4 > payload.length) throw damaged();
     const signature = payload.slice(4, signatureSize + 4);
-    const document = payload.slice(signatureSize + 4);
+    const data = payload.slice(signatureSize + 4);
     const verified = await crypto.subtle.verify(
       { name: "RSA-PSS", saltLength: 32 },
       signerKey,
       signature,
-      document,
+      data,
     );
-    if (!verified) throw new Error("Signature verification failed; the report was changed or the signer key is wrong.");
-    return document;
+    if (!verified) {
+      throw new CryptoFailure(
+        `Signature verification failed; the ${item} was changed or the signer key is wrong.`,
+        "signature",
+      );
+    }
+    return data;
   }
 
   function toPem(label, bytes) {
@@ -397,20 +432,53 @@
       if (action === "generate") {
         self.postMessage({ id, result: await generateKeys() });
       } else if (action === "encrypt") {
-        const result = await encryptDocument(payload);
+        const result = await signAndEncrypt({
+          data: new Uint8Array(payload.document),
+          signingPrivatePem: payload.signingPrivatePem,
+          signingPublicPem: payload.signingPublicPem,
+          recipientPublicPem: payload.recipientPublicPem,
+          item: "report",
+        });
         self.postMessage({ id, result });
       } else if (action === "decrypt") {
-        const result = await decryptDocument(payload);
+        const result = await decryptAndVerify({
+          ciphertext: payload.ciphertext,
+          iv: payload.iv,
+          wrappedKey: payload.wrappedKey,
+          privatePem: payload.recipientPrivatePem,
+          signerPublicPem: payload.signerPublicPem,
+          item: "report",
+        });
         self.postMessage({ id, result }, [result.buffer]);
+      } else if (action === "encrypt-message") {
+        const result = await signAndEncrypt({
+          data: new TextEncoder().encode(payload.text),
+          signingPrivatePem: payload.signingPrivatePem,
+          signingPublicPem: payload.signingPublicPem,
+          recipientPublicPem: payload.recipientPublicPem,
+          senderPublicPem: payload.senderPublicPem,
+          item: "message",
+        });
+        self.postMessage({ id, result });
+      } else if (action === "decrypt-message") {
+        const data = await decryptAndVerify({ ...payload, item: "message" });
+        let text;
+        try {
+          text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+        } catch {
+          throw new CryptoFailure("The message is damaged and cannot be decrypted.", "damaged");
+        }
+        self.postMessage({ id, result: text });
       } else if (action === "self-test") {
         self.postMessage({ id, result: runDesSelfTest() });
       } else {
-        throw new Error("Unsupported document operation.");
+        throw new Error("Unsupported cryptographic operation.");
       }
     } catch (error) {
       self.postMessage({
         id,
-        error: error instanceof Error ? error.message : "Document operation failed.",
+        error: error instanceof Error ? error.message : "Cryptographic operation failed.",
+        code: error instanceof CryptoFailure ? error.code : "failed",
       });
     }
   };

@@ -64,6 +64,10 @@ class PublicKey(Base):
 
 
 class ChatMessage(Base):
+    """A chat message, protected exactly like a report: signed by the sender and
+    DES-encrypted in the browser. The DES key is wrapped twice with RSA: once for the
+    recipient and once for the sender, so both participants can read the conversation."""
+
     __tablename__ = "chat_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -71,7 +75,13 @@ class ChatMessage(Base):
         ForeignKey("relationships.id", ondelete="CASCADE"), index=True
     )
     sender_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    body: Mapped[str] = mapped_column(String(4000))
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    iv: Mapped[bytes] = mapped_column(LargeBinary(8))
+    wrapped_des_key: Mapped[bytes] = mapped_column(LargeBinary)
+    sender_wrapped_des_key: Mapped[bytes] = mapped_column(LargeBinary)
+    recipient_key_id: Mapped[str] = mapped_column(ForeignKey("public_keys.id"))
+    sender_key_id: Mapped[str] = mapped_column(ForeignKey("public_keys.id"))
+    signing_key_id: Mapped[str] = mapped_column(ForeignKey("public_keys.id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
     )

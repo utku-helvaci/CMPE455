@@ -214,6 +214,10 @@
             <section id="chat-panel" class="workspace-panel chat-panel" role="tabpanel" aria-labelledby="chat-tab">
               <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
               <p id="chat-message" class="inline-message" role="alert" hidden></p>
+              <p id="chat-key-notice" class="chat-key-notice" role="status" hidden>
+                <span id="chat-key-notice-text"></span>
+                <button id="chat-key-notice-open" class="link-button" type="button">Open Security keys</button>
+              </p>
               <form id="chat-form" class="chat-form">
                 <label class="sr-only" for="chat-input">Write a message</label>
                 <textarea
@@ -228,7 +232,7 @@
                   <span>Send</span><span aria-hidden="true">↗</span>
                 </button>
               </form>
-              <p class="chat-note">Messages are stored by the server and protected in transit by HTTPS.</p>
+              <p class="chat-note">Messages are signed and DES-encrypted in your browser, like reports. The server stores only ciphertext.</p>
             </section>
 
             <section id="documents-panel" class="workspace-panel documents-panel" role="tabpanel" aria-labelledby="documents-tab" hidden>

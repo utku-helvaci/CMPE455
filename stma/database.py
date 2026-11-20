@@ -1,6 +1,10 @@
+import logging
+
 from sqlalchemy import Index, create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -16,9 +20,31 @@ def create_database(url: str) -> tuple[Engine, sessionmaker[Session]]:
     return engine, factory
 
 
+def _drop_plaintext_chat_table(engine: Engine) -> None:
+    """Removes the chat table from before chat was encrypted.
+
+    Messages used to be stored as readable text in a ``body`` column. They cannot be
+    converted: signing a message needs the sender's private key, which the server never
+    has. The old table is dropped and ``create_all`` recreates it in the encrypted format.
+    """
+    inspector = inspect(engine)
+    if "chat_messages" not in inspector.get_table_names():
+        return
+    if "body" not in {column["name"] for column in inspector.get_columns("chat_messages")}:
+        return
+    with engine.begin() as connection:
+        removed = connection.execute(text("SELECT COUNT(*) FROM chat_messages")).scalar_one()
+        connection.execute(text("DROP TABLE chat_messages"))
+    logger.warning(
+        "Chat is now stored encrypted: removed the old plaintext chat table and its %d message(s).",
+        removed,
+    )
+
+
 def initialize_database(engine: Engine) -> None:
     global school_id_index
 
+    _drop_plaintext_chat_table(engine)
     Base.metadata.create_all(engine)
 
     user_columns = {column["name"] for column in inspect(engine).get_columns("users")}

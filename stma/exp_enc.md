@@ -42,8 +42,8 @@ Report
 
 When the teacher sends a report to the student, the process is reversed: the teacher signs with their private signing key, and the DES key is locked with the **student’s public encryption key**.
 
-### Chat in the current implementation
+### Chat messages
 
-Chat is **not** encrypted with RSA or DES in this version. The browser sends the message to the server over HTTPS, and the server stores the message text and returns it to the other person. HTTPS protects it on the network only if TLS/HTTPS is configured; it does not encrypt the chat in the database.
+Chat uses the **same scheme as reports**. The browser signs each message with the sender's private signing key, encrypts it with a new DES key, and locks that DES key with RSA. The only difference is that the DES key is locked **twice**: once with the partner's public encryption key and once with the sender's own public encryption key. That way both people can read the conversation later, each with their own private key. The server stores and forwards only ciphertext.
 
-So: **the server doesn’t encrypt files when sending them back**. It stores and forwards the report package already encrypted by the sender’s browser.
+So: **the server doesn’t encrypt files or messages when sending them back**. It stores and forwards packages already encrypted by the sender’s browser.

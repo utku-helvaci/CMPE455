@@ -82,14 +82,28 @@ class PublicKeyView(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
+    """A chat message sealed in the sender's browser; the server never sees its text."""
+
+    ciphertext_b64: str = Field(min_length=1, max_length=28000)
+    iv_b64: str = Field(min_length=1, max_length=32)
+    wrapped_des_key_b64: str = Field(min_length=1, max_length=4096)
+    sender_wrapped_des_key_b64: str = Field(min_length=1, max_length=4096)
+    recipient_key_id: str
+    sender_key_id: str
+    signing_key_id: str
 
 
 class MessageView(BaseModel):
     id: str
     relationship_id: str
     sender_id: str
-    body: str
+    ciphertext_b64: str
+    iv_b64: str
+    wrapped_des_key_b64: str
+    sender_wrapped_des_key_b64: str
+    recipient_key_id: str
+    sender_key_id: str
+    signing_key_id: str
     created_at: datetime
 
 

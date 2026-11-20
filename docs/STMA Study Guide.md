@@ -4,13 +4,13 @@ Nov 16, 2026 · @Utku
 
 ## Start here
 
-STMA is a website where a student and a teacher (the "evaluator") chat and send each other report files, and the server that stores those files cannot read them.
+STMA is a website where a student and a teacher (the "evaluator") chat and send each other report files, and the server that stores those messages and files cannot read them.
 
-That last part is the whole point of the project. A report is locked on the sender's computer before it is uploaded. Only the person it was sent to can unlock it. The server only ever holds a locked box.
+That last part is the whole point of the project. A report or chat message is locked on the sender's computer before it is uploaded. Only the person it was sent to can unlock it. The server only ever holds a locked box.
 
 If you remember one sentence for the defense, use this one:
 
-> The sender signs the report with RSA, encrypts it with a fresh DES key, and locks that DES key with the receiver's RSA public key. The server stores only the encrypted result.
+> The sender signs the report or message with RSA, encrypts it with a fresh DES key, and locks that DES key with the receiver's RSA public key. The server stores only the encrypted result.
 
 How to use this guide:
 
@@ -60,10 +60,11 @@ Encrypted report files are saved in a folder on the server, not inside the datab
 | Private RSA keys | No. They never leave the user's computer |
 | Public RSA keys | Yes. Public keys are meant to be public |
 | Report file name, size, sender, date | Yes |
-| Chat messages | Yes. Chat is protected by HTTPS on the network but stored as normal text in the database |
+| Chat message text | No. Messages are signed and DES-encrypted in the browser exactly like reports |
+| Who messaged whom, and when | Yes |
 | Passwords | No. Only a one-way hash is stored |
 
-Be ready for the chat row. The assignment requires DES and signatures for documents, not for chat, so chat is not end-to-end encrypted. Say this plainly if asked.
+Chat uses the same protection as reports. The one difference is that each message's DES key is locked twice, once for each participant; section 5 explains why.
 
 ## The database
 
@@ -79,7 +80,7 @@ Two terms you need: a **primary key** (PK) is the unique ID of a row. A **foreig
 | `login_sessions` | One active login | `user_id` (FK to users), `token_hash`, `expires_at` |
 | `relationships` | One student paired with one evaluator | `student_id` (FK to users), `evaluator_id` (FK to users), `active` |
 | `public_keys` | One published RSA public key | `user_id` (FK to users), `purpose` (signing or encryption), `version`, `public_key_pem` |
-| `chat_messages` | One chat message | `relationship_id` (FK), `sender_id` (FK to users), `body`, `created_at` |
+| `chat_messages` | One encrypted chat message | `relationship_id` (FK), `sender_id` (FK to users), `ciphertext`, `iv`, `wrapped_des_key`, `sender_wrapped_des_key`, `recipient_key_id`, `sender_key_id` and `signing_key_id` (FKs to public\_keys), `created_at` |
 | `documents` | One uploaded encrypted report | `relationship_id` (FK), `sender_id` (FK to users), `filename`, `storage_name`, `iv`, `wrapped_des_key`, `recipient_key_id` (FK to public\_keys), `signing_key_id` (FK to public\_keys) |
 
 ### How they relate
@@ -93,11 +94,13 @@ Read the diagram like this: every line is one foreign key, and the label is the 
 - **A relationship has many chat messages and many documents.** Both tables point at the relationship, not directly at the receiver. The receiver is simply "the other person in the relationship".
 - **A user has many public keys.** Each key has a purpose and a version number. A unique rule (`uq_user_key_version`) stops two keys with the same user, purpose and version.
 - **A document points at two public keys:** the receiver's encryption key that locked its DES key, and the sender's signing key that signed it. This is what makes old reports still openable after keys change.
+- **A chat message points at three public keys:** the receiver's encryption key and the sender's own encryption key (each locked one copy of the message's DES key), and the sender's signing key.
 
 ### Things the instructor may point at
 
 - **Where is the encrypted file?** Not in the database. `documents.storage_name` is the random file name of the ciphertext inside the server's storage folder. The database row holds everything else needed to open it: `iv` and `wrapped_des_key`.
 - **Where is the DES key?** In `documents.wrapped_des_key`, but locked with RSA. Nobody can use it without the receiver's private key.
+- **Where is the text of a chat message?** Nowhere readable. `chat_messages.ciphertext` holds the DES-encrypted message. Messages are small, so unlike reports they are stored inside the database rather than as files.
 - **Where are private keys?** Nowhere in the database. There is no column for them.
 - **Where is the password?** `users.password_hash` holds an Argon2id hash, not the password.
 - **What does `active` do?** When a teacher ends a relationship, `active` becomes false. Messages and files stay stored but nobody can open the conversation. Adding the same student again switches it back on.
@@ -158,8 +161,8 @@ Every user has one pair for **encryption** and a separate pair for **signing**. 
 | Key | Who uses it | For what |
 | --- | --- | --- |
 | Your encryption **public** key | The other person | To lock a DES key so only you can open it |
-| Your encryption **private** key | You | To unlock DES keys of reports sent to you |
-| Your signing **private** key | You | To sign reports you send |
+| Your encryption **private** key | You | To unlock DES keys of reports and messages sent to you |
+| Your signing **private** key | You | To sign reports and messages you send |
 | Your signing **public** key | The other person | To check your signature |
 
 A quick way to remember it: **to send, I need my signing private key and your encryption public key. To receive, I need my encryption private key and your signing public key.**
@@ -184,23 +187,26 @@ Because the signature is inside the encrypted package, the server cannot even se
 
 ### The same five steps in the code
 
-The shortest version to show is the Python one in `stma/crypto.py`, function `encrypt_document`. These few lines are the whole algorithm:
+The shortest version to show is the Python one in `stma/crypto.py`, function `_sign_and_encrypt`, which reports and chat messages share. These few lines are the whole algorithm:
 
 ```python
-signature = pss.new(signer).sign(SHA256.new(document))                 # 1. sign
-payload = struct.pack(">I", len(signature)) + signature + document     # 2. pack
-des_key = get_random_bytes(8)                                          # 3. new DES key
-iv = get_random_bytes(8)                                               #    and IV
+signature = pss.new(signer).sign(SHA256.new(data))                  # 1. sign
+payload = struct.pack(">I", len(signature)) + signature + data      # 2. pack
+des_key = get_random_bytes(8)                                       # 3. new DES key
+iv = get_random_bytes(8)                                            #    and IV
 ciphertext = DES.new(des_key, DES.MODE_CBC, iv).encrypt(pad(payload, DES.block_size))
-wrapped_key = PKCS1_OAEP.new(recipient, hashAlgo=SHA256).encrypt(des_key)  # 4. wrap
+wrapped_keys = [PKCS1_OAEP.new(recipient, hashAlgo=SHA256).encrypt(des_key)
+                for recipient in recipients]                        # 4. wrap
 ```
+
+A report has one recipient, so it gets one wrapped key. A chat message has two (see below).
 
 The website does exactly the same thing in JavaScript, because the encryption must run in the browser. If asked which code really runs when you click **Send a report**, it is the JavaScript:
 
 | Step | File | Function |
 | --- | --- | --- |
 | Button click, picks the right keys, calls the worker, uploads | `stma/static/workspace.js` | `uploadDocument` |
-| Steps 1 to 4 | `stma/static/document-crypto.js` | `encryptDocument` |
+| Steps 1 to 4 | `stma/static/document-crypto.js` | `signAndEncrypt` |
 | The DES-CBC loop and padding | `stma/static/document-crypto.js` | `desCbcEncrypt` |
 | DES itself (16 rounds, S-boxes) | `stma/static/document-crypto.js` | `makeSubkeys`, `feistel`, `cryptBlock` |
 | Step 5 on the server: checks, saves file, saves row | `stma/main.py` | `upload_document` |
@@ -208,7 +214,7 @@ The website does exactly the same thing in JavaScript, because the encryption mu
 Two honest details worth knowing:
 
 - **RSA comes from the browser's built-in Web Crypto. DES was written by hand.** Browsers do not offer DES because it is outdated, so `document-crypto.js` contains a full DES implementation: the permutation tables and S-boxes at the top are the standard DES tables.
-- **The Python `stma/crypto.py` is used by the tests**, to prove the algorithm works and that tampering is detected. The server never encrypts or decrypts a report.
+- **The Python `stma/crypto.py` is used by the tests**, to prove the algorithm works and that tampering is detected. The server never encrypts or decrypts a report or message. `tests/test_browser_crypto.py` also runs the browser's JavaScript and checks that it and the Python version open each other's messages and reports.
 
 ### What the server checks on upload
 
@@ -220,6 +226,22 @@ The server cannot read the report, but `upload_document` still refuses bad uploa
 - The wrapped DES key must be the right size for the receiver's RSA key.
 
 Then it writes the ciphertext to the storage folder under a random name and adds a row to `documents`.
+
+### Chat messages use the same steps
+
+A chat message goes through exactly the five steps above, with one difference in step 4: the DES key is wrapped **twice**.
+
+- One copy is locked with the partner's encryption public key, so they can read it.
+- One copy is locked with the sender's **own** encryption public key, so the sender can still read their sent messages after logging in again. Without it, a sent message could only be opened by the partner.
+
+Both copies are stored in the message row: `wrapped_des_key` for the partner and `sender_wrapped_des_key` for the sender. The server checks each one belongs to the right person and has the right size, as it does for reports.
+
+| Step | File | Function |
+| --- | --- | --- |
+| Send button: picks the keys, seals the message, uploads it | `stma/static/workspace.js` | `sealMessage` and the chat form's submit handler |
+| Steps 1 to 4, with the second wrapped key | `stma/static/document-crypto.js` | `signAndEncrypt`, given `senderPublicPem` |
+| Python version | `stma/crypto.py` | `encrypt_message` |
+| Server checks and stores the row | `stma/main.py` | `send_message` |
 
 ## Receiving a report, step by step
 
@@ -238,16 +260,16 @@ Example: the teacher clicks **Verify & download** on the student's report.
 
 ### In the code
 
-Python version, `decrypt_and_verify_document` in `stma/crypto.py`:
+Python version, `_decrypt_and_verify` in `stma/crypto.py`, shared by reports and messages:
 
 ```python
-des_key = PKCS1_OAEP.new(recipient, hashAlgo=SHA256).decrypt(encrypted.wrapped_key)  # 2. unwrap
-payload = unpad(DES.new(des_key, DES.MODE_CBC, encrypted.iv)
-                .decrypt(encrypted.ciphertext), DES.block_size)                   # 3. decrypt
-signature_size = struct.unpack(">I", payload[:4])[0]                                 # 4. unpack
+des_key = PKCS1_OAEP.new(recipient, hashAlgo=SHA256).decrypt(wrapped_key)        # 2. unwrap
+payload = unpad(DES.new(des_key, DES.MODE_CBC, iv).decrypt(ciphertext),
+                DES.block_size)                                                  # 3. decrypt
+signature_size = struct.unpack(">I", payload[:4])[0]                             # 4. unpack
 signature = payload[4:4 + signature_size]
-document = payload[4 + signature_size:]
-pss.new(signer).verify(SHA256.new(document), signature)                              # 5. verify
+data = payload[4 + signature_size:]
+pss.new(signer).verify(SHA256.new(data), signature)                              # 5. verify
 ```
 
 What actually runs in the browser:
@@ -255,7 +277,7 @@ What actually runs in the browser:
 | Step | File | Function |
 | --- | --- | --- |
 | Button click, finds the sender's signing key, calls the worker, saves the file | `stma/static/workspace.js` | `receiveDocument` |
-| Steps 2 to 5 | `stma/static/document-crypto.js` | `decryptDocument` |
+| Steps 2 to 5 | `stma/static/document-crypto.js` | `decryptAndVerify` |
 | The DES-CBC loop and padding check | `stma/static/document-crypto.js` | `desCbcDecrypt` |
 | Server side: returns the stored package to participants only | `stma/main.py` | `list_documents` |
 
@@ -270,6 +292,17 @@ What actually runs in the browser:
 
 The tests in `tests/test_crypto.py` prove the last two: one test flips a byte of the ciphertext and one uses the wrong signing key, and both must be rejected.
 
+### Reading chat messages
+
+Chat messages are opened with the same steps 2 to 5, automatically, as they arrive. The reader uses the copy of the DES key locked for them: the partner's messages through `wrapped_des_key`, their own through `sender_wrapped_des_key`.
+
+- Each message is decrypted once and kept only in that browser tab's memory. Signing out clears it.
+- Without the decryption private key loaded, a message shows as "Encrypted message", and a note above the message box says which key file to load.
+- A message whose signature check fails is not shown. Its bubble says the check failed instead.
+- Each bubble that was decrypted and verified shows "✓ Verified".
+
+In the code: `decryptMessages` and `decryptMessage` in `workspace.js`, which call `decryptAndVerify` in `document-crypto.js`; the Python version is `decrypt_and_verify_message`.
+
 ## Keys, key rotation, passwords and logins
 
 ### How keys are created
@@ -280,7 +313,7 @@ Keys are created in the browser when the user clicks **Generate keys** in the Se
 2. It uploads the two **public** keys to the server (`publish_key` in `main.py`).
 3. It offers the two **private** keys as download links: `<username>-signing-private.pem` and `<username>-encryption-private.pem`.
 
-The private keys stay in the browser's memory only while that tab is open. After logging in again, the user must load the two `.pem` files with the file pickers in the Security keys tab.
+The private keys stay in the browser's memory only while that tab is open. After logging in again, the user must load the two `.pem` files with the file pickers in the Security keys tab. Until then, chat messages cannot be read or sent.
 
 ### Key rotation ("RSA keys are periodically updated")
 
@@ -288,12 +321,13 @@ Rotation means replacing your keys with new ones. In STMA the user does it by cl
 
 - The server gives the new public keys the next **version** number: v1, then v2, then v3. See `version=(latest_version or 0) + 1` in `publish_key`.
 - Old public keys are **not deleted**. They stay in `public_keys`.
-- New reports always use the newest version.
+- New reports and chat messages always use the newest version.
 - Every document row remembers which key versions it used (`recipient_key_id`, `signing_key_id`). The Documents tab shows this as "Recipient encryption key v2".
+- Every chat message row does the same. A message locked for a key version that is not loaded says so, for example "Encrypted for your encryption key v1, which is not loaded".
 
 Why keep old versions? A report sent in October was locked with the v1 key. To open it later you still need the v1 **private** key file, and to check its signature the app still needs the sender's v1 **public** key. So users must keep their old private key files.
 
-Why rotate at all? If a private key is stolen, the thief can only open reports that were locked with that one version. Reports sent after the rotation use a different key.
+Why rotate at all? If a private key is stolen, the thief can only open reports and messages that were locked with that one version. Those sent after the rotation use a different key.
 
 The project's policy is rotation every 90 days. The policy is written in the README; the app does not force it or remind the user. Section 9 covers how to say this.
 
@@ -352,10 +386,10 @@ The project is small: seven Python files for the server and three JavaScript fil
 | the database tables | `stma/models.py` | the whole file, about 100 lines |
 | the relation between student and evaluator | `stma/models.py` | `class Relationship` |
 | DES encryption | `stma/static/document-crypto.js` | `desCbcEncrypt`, then `cryptBlock` and `feistel` |
-| the DES key being generated | `stma/static/document-crypto.js` | `encryptDocument`, the line with `crypto.getRandomValues(new Uint8Array(8))` |
-| RSA protecting the DES key | `stma/static/document-crypto.js` | `encryptDocument`, the `RSA-OAEP` encrypt call near the end |
-| the digital signature being made | `stma/static/document-crypto.js` | `encryptDocument`, the `crypto.subtle.sign` call |
-| the signature being checked | `stma/static/document-crypto.js` | `decryptDocument`, the `crypto.subtle.verify` call |
+| the DES key being generated | `stma/static/document-crypto.js` | `signAndEncrypt`, the line with `crypto.getRandomValues(new Uint8Array(8))` |
+| RSA protecting the DES key | `stma/static/document-crypto.js` | `signAndEncrypt`, the `RSA-OAEP` encrypt call in `wrapFor` near the end |
+| the digital signature being made | `stma/static/document-crypto.js` | `signAndEncrypt`, the `crypto.subtle.sign` call |
+| the signature being checked | `stma/static/document-crypto.js` | `decryptAndVerify`, the `crypto.subtle.verify` call |
 | RSA key generation | `stma/static/document-crypto.js` | `generateKeys` |
 | key versions (rotation) | `stma/main.py` | `publish_key` |
 | that files are stored encrypted | `stma/main.py` | `upload_document`, where it writes `ciphertext` to `storage_path` |
@@ -363,17 +397,18 @@ The project is small: seven Python files for the server and three JavaScript fil
 | the Sysadmin monitoring | `stma/main.py` | `admin_health` |
 | password hashing | `stma/security.py` | `hash_password` |
 | login | `stma/main.py` | `login` and `current_user` |
-| chat | `stma/main.py` | `send_message`, `list_messages`; in the browser `refreshMessages` in `workspace.js` |
-| the whole algorithm in a few lines | `stma/crypto.py` | `encrypt_document` and `decrypt_and_verify_document` |
+| chat | `stma/main.py` | `send_message`, `list_messages`; in the browser `sealMessage`, `decryptMessages` and `refreshMessages` in `workspace.js` |
+| that chat messages are stored encrypted | `stma/models.py` | `class ChatMessage`: there is no text column, only `ciphertext` and the two wrapped DES keys |
+| the whole algorithm in a few lines | `stma/crypto.py` | `_sign_and_encrypt` and `_decrypt_and_verify` |
 | proof that tampering is detected | `tests/test_crypto.py` | `test_modified_ciphertext_is_rejected` |
 
 ### How chat works
 
-Chat is the simplest part. Sending a message is a normal request that adds a row to `chat_messages`. Every 3 seconds the browser asks the server for the messages of the open conversation, and at the same time checks for new documents and new keys. There is no permanent connection; this repeated asking is called polling.
+The browser seals each message like a report (`sealMessage`) and uploads the result, which becomes a row in `chat_messages`. Every 3 seconds the browser asks the server for the messages of the open conversation, and at the same time checks for new documents and new keys. New messages are decrypted once and kept in the tab's memory. There is no permanent connection; this repeated asking is called polling.
 
 ## Where the project differs from the assignment
 
-The project meets the core requirements: two or more computers, chat, DES-encrypted and signed documents stored encrypted, the DES key exchanged with RSA, and a Sysadmin who monitors without reading content. It does less than the longer description in six places.
+The project meets the core requirements: two or more computers, chat, DES-encrypted and signed documents and messages stored encrypted, the DES key exchanged with RSA, and a Sysadmin who monitors without reading content. It does less than the longer description in five places.
 
 Know these before the defense. An honest, prepared answer is much better than being caught by surprise.
 
@@ -383,11 +418,12 @@ Know these before the defense. An honest, prepared answer is much better than be
 | --- | --- |
 | At least two separate computers | Server on one computer, browsers on others, over HTTPS on the local network |
 | Clients chat | Yes, per student and evaluator pair |
+| Messages protected like documents (asked by the instructor) | Yes, the same signing, DES and RSA scheme; each message's DES key is also locked for the sender so both can read the history |
 | Documents DES-encrypted before leaving the computer | Yes, in the browser, DES-CBC with a new key per report |
 | Documents stored DES-encrypted | Yes, only ciphertext is saved on the server |
 | Session key exchanged with RSA | Yes, the DES key is encrypted with the receiver's RSA public key (RSA-OAEP) |
 | Digital signature for identity and integrity | Yes, RSA-PSS with SHA-256, checked before download |
-| Sysadmin does not read chats or documents | Yes, the server refuses those requests for the Sysadmin |
+| Sysadmin does not read chats or documents | Yes: the server refuses those requests, and both are stored encrypted anyway |
 | Central server stores documents and routes chat | Yes |
 
 ### What differs
@@ -397,7 +433,6 @@ Know these before the defense. An honest, prepared answer is much better than be
 | RSA keys are **periodically** updated | Rotation is manual. The user clicks Generate keys; versions are tracked; the 90-day policy is only written down | "Rotation is supported and versioned, and old reports stay readable. The schedule is a policy, the app does not enforce it yet. A reminder when a key is older than 90 days would be the next step." |
 | Sysadmin tracks **performance** and monitors **traffic**, with a dashboard or log view | The dashboard shows four numbers: service status, user accounts, active relationships, stored documents. No performance, traffic or log view | "Monitoring is basic health counts. Request logs exist in the server and Nginx containers but are not shown in the dashboard." |
 | Sysadmin is responsible **strictly** for monitoring | The Sysadmin also assigns roles to new accounts and can delete accounts | "Someone has to approve accounts, so we gave that to the Sysadmin. They still cannot see content." |
-| All data is kept highly secure; the admin cannot read chats | Chat is protected by HTTPS on the network, but stored as readable text in the database. The Sysadmin cannot read it through the app, but whoever controls the database could | "The assignment requires DES and signatures for documents. Chat is not end-to-end encrypted; that is a known limit." |
 | Student uploads a **Training Report**, evaluator uploads an **Evaluation Report** | Either side can send any file. There is no document type and no rule about who sends what | "The app treats both as reports. The sender's role tells you which one it is." |
 | Signatures stop a teacher **claiming they never received** a report | The signature proves who sent it and that it is unchanged. Nothing proves the receiver opened it. The server only records that it was stored | "We prove origin and integrity. Proof of receipt would need the receiver to sign an acknowledgement." |
 
@@ -414,6 +449,7 @@ Section 5 of `STMA_Report.docx` describes an earlier plan. The instructor may co
 | --- | --- |
 | PySide6 desktop interfaces for students and evaluators | Is a website used from a browser; there is no desktop app |
 | WebSocket-based chat (`wss://`) | Asks the server for new messages every 3 seconds over normal HTTPS |
+| Chat does not use the document DES scheme (5.2) | Encrypts chat messages with the same DES, RSA and signature scheme as reports |
 | Alembic manages schema migrations | Does not use Alembic; tables are created at startup |
 | The database stores delivery status | Has no delivery status column |
 | PyCryptodome provides the cryptographic algorithms | Uses PyCryptodome only on the server and in tests; the real encryption runs in the browser with Web Crypto and a hand-written DES |
@@ -426,7 +462,7 @@ Cover the answer, say yours out loud, then compare. Short and correct beats long
 
 **Why do you use both DES and RSA? Why not only one?** DES is fast but both sides need the same secret key. RSA solves sharing a secret but is slow and can only encrypt small data. So DES encrypts the file, and RSA encrypts the small DES key.
 
-**What is the session key?** The random 8-byte DES key. A new one is created for every report, used once, and sent along encrypted with the receiver's RSA public key.
+**What is the session key?** The random 8-byte DES key. A new one is created for every report and every chat message, used once, and sent along encrypted with the receiver's RSA public key.
 
 **Which key encrypts the DES key, and which decrypts it?** The receiver's encryption public key encrypts it. Only the receiver's encryption private key decrypts it.
 
@@ -442,6 +478,8 @@ Cover the answer, say yours out loud, then compare. Short and correct beats long
 
 **What is a hash and where do you use one?** A one-way fingerprint of data. SHA-256 is used in the signature, for key fingerprints and for login tokens. Argon2id is used for passwords.
 
+**Why is a chat message's DES key encrypted twice?** Once with the partner's public key so they can read it, and once with the sender's own public key so the sender can still read their sent messages later. Reports are only encrypted for the recipient.
+
 **Is DES secure?** No. Its 56-bit key is too short today. It is used because the assignment requires it; a real system would use AES.
 
 **What size are the RSA keys?** 3072 bits.
@@ -452,11 +490,11 @@ Cover the answer, say yours out loud, then compare. Short and correct beats long
 
 **What exactly is stored for one document?** The ciphertext as a file on disk. In the `documents` table: file name, size, sender, relationship, IV, the wrapped DES key, and the IDs of the two public keys used.
 
-**If someone steals the database, what do they get?** Chat messages, user names, public keys and file names. Not passwords (only hashes), not report contents, not private keys.
+**If someone steals the database, what do they get?** User names, public keys, file names, and who messaged whom and when. Not passwords (only hashes), not report contents, not message text, not private keys.
 
 **Where are private keys kept?** Only on the user's own computer, as two downloaded `.pem` files. They are not password-protected, so the user must keep them safe.
 
-**What if a user loses their private key?** Reports that were encrypted for that key can no longer be opened. The user generates new keys, and the sender must send the report again.
+**What if a user loses their private key?** Reports and messages that were encrypted for that key can no longer be opened. The user generates new keys, and the sender must send the report or message again.
 
 ### Keys and rotation
 
@@ -484,9 +522,9 @@ Cover the answer, say yours out loud, then compare. Short and correct beats long
 
 **What does the Sysadmin do?** Sees health counts, assigns roles to new accounts and deletes accounts. Cannot open chats or documents.
 
-**How does chat work?** Messages are saved in the database. Each browser asks the server for new messages every 3 seconds. HTTPS protects them on the network.
+**How does chat work?** The browser signs and encrypts each message like a report and uploads only the ciphertext. Each browser asks the server for new messages every 3 seconds and decrypts them with its own private key.
 
-**Why HTTPS?** It protects passwords, login tokens and chat while they travel. Browsers also only allow the Web Crypto functions on secure pages.
+**Why HTTPS?** It protects passwords and login tokens while they travel, and adds a second layer around the already encrypted reports and messages. Browsers also only allow the Web Crypto functions on secure pages.
 
 ## Demo checklist
 
@@ -505,8 +543,9 @@ Run through this whole list at least once before the defense, on the same comput
 ### The demo, in order
 
 - [ ] Log in as the student on one computer and as the evaluator on the other
+- [ ] Point at the chat: messages show "Encrypted message" and a note asks for the key files
+- [ ] On both sides, load the two private key files in the Security keys tab; the messages open and show "✓ Verified"
 - [ ] Send a chat message each way and show it arriving
-- [ ] On both sides, load the two private key files in the Security keys tab
 - [ ] Student sends the report; show "Report encrypted, signed, and uploaded successfully"
 - [ ] Evaluator clicks Verify & download; show "Signature verified" and open the file
 - [ ] Evaluator sends an evaluation report back; student verifies and downloads it
@@ -518,6 +557,7 @@ Run through this whole list at least once before the defense, on the same comput
 
 - [ ] Show the stored file on the server: it is unreadable bytes, not the report. With Docker the files are in the `stma_documents` volume, mounted at `/app/storage` in the app container
 - [ ] Show the `documents` table: it has `wrapped_des_key` and `iv` but no readable content
+- [ ] Show the `chat_messages` table: `ciphertext` and two wrapped DES keys per message, and no text column
 - [ ] Show the `users` table: `password_hash` starts with `$argon2id$`, not a password
 
 The README explains how to look inside the database with HeidiSQL.

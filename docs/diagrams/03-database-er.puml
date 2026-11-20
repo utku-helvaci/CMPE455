@@ -57,7 +57,13 @@ entity chat_messages {
   --
   * relationship_id : varchar(36) <<FK relationships>>
   * sender_id : varchar(36) <<FK users>>
-  * body : varchar(4000)
+  * ciphertext : binary
+  * iv : binary(8)
+  * wrapped_des_key : binary
+  * sender_wrapped_des_key : binary
+  * recipient_key_id : varchar(36) <<FK public_keys>>
+  * sender_key_id : varchar(36) <<FK public_keys>>
+  * signing_key_id : varchar(36) <<FK public_keys>>
   * created_at : timestamp
 }
 
@@ -86,6 +92,9 @@ users ||--o{ chat_messages : "sender_id"
 users ||--o{ documents : "sender_id"
 public_keys ||--o{ documents : "recipient_key_id"
 public_keys ||--o{ documents : "signing_key_id"
+public_keys ||--o{ chat_messages : "recipient_key_id"
+public_keys ||--o{ chat_messages : "sender_key_id"
+public_keys ||--o{ chat_messages : "signing_key_id"
 
 legend bottom right
   Each line is a foreign key, labelled with the column that holds it.

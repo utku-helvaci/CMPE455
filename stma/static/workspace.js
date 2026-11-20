@@ -37,6 +37,13 @@ const state = {
   loadId: 0,
   signingPrivatePem: null,
   encryptionPrivatePem: null,
+  messages: [],
+  // Decrypted chat lives only in this tab's memory: message id -> { text } or { error }.
+  messageText: new Map(),
+  decryptingMessages: new Set(),
+  messageCacheVersion: 0,
+  messagesRendered: "",
+  pollError: false,
 };
 
 function showInlineMessage(id, message, success = false) {
@@ -87,14 +94,16 @@ function startCryptoWorker() {
     if (!pending) return;
     state.pendingCrypto.delete(event.data.id);
     if (event.data.error) {
-      pending.reject(new Error(event.data.error));
+      const failure = new Error(event.data.error);
+      failure.code = event.data.code;
+      pending.reject(failure);
     } else {
       pending.resolve(event.data.result);
     }
   });
   state.worker.addEventListener("error", () => {
     for (const pending of state.pendingCrypto.values()) {
-      pending.reject(new Error("Document cryptography failed in the browser."));
+      pending.reject(new Error("Cryptography failed in the browser."));
     }
     state.pendingCrypto.clear();
   });
@@ -116,6 +125,12 @@ function initials(name) {
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join("");
+}
+
+function latestKey(userId, purpose) {
+  return state.keys
+    .filter((key) => key.user_id === userId && key.purpose === purpose)
+    .sort((a, b) => b.version - a.version)[0];
 }
 
 function counterpartFor(relationship) {
@@ -235,6 +250,13 @@ async function stopWorkspace() {
   state.keys = [];
   state.signingPrivatePem = null;
   state.encryptionPrivatePem = null;
+  state.messages = [];
+  state.messageText.clear();
+  state.decryptingMessages.clear();
+  state.messagesRendered = "";
+  state.pollError = false;
+  chatMessages.replaceChildren();
+  document.querySelector("#chat-key-notice").hidden = true;
   document.querySelector("#signing-private-key").value = "";
   document.querySelector("#encryption-private-key").value = "";
   workspace.hidden = true;
@@ -261,6 +283,7 @@ async function selectRelationship(relationshipId) {
   hideInlineMessage("chat-message");
   hideInlineMessage("document-message");
   hideInlineMessage("key-message");
+  state.pollError = false;
 
   try {
     const [keys, messages, documents] = await Promise.all([
@@ -270,10 +293,13 @@ async function selectRelationship(relationshipId) {
     ]);
     if (requestId !== state.loadId) return;
     state.keys = keys;
+    state.messages = messages;
     renderKeys();
-    renderMessages(messages);
+    renderMessages({ force: true });
+    updateChatKeyNotice();
     renderDocuments(documents);
     setConnectionStatus(true);
+    decryptMessages();
     state.pollTimer = setInterval(() => refreshMessages(relationshipId), 3000);
   } catch (error) {
     if (requestId === state.loadId) {
@@ -302,11 +328,51 @@ function setConnectionStatus(connected) {
   status.prepend(indicator);
 }
 
-function renderMessages(messages) {
+function messageContent(message) {
+  const entry = state.messageText.get(message.id);
+  if (entry && "text" in entry) return { text: entry.text };
+  if (!state.encryptionPrivatePem) return { placeholder: "Encrypted message" };
+  if (!entry) return { placeholder: "Decrypting…" };
+  switch (entry.error) {
+    case "wrong-key": {
+      const own = message.sender_id === state.user.id;
+      const keyId = own ? message.sender_key_id : message.recipient_key_id;
+      const version = state.keys.find((key) => key.id === keyId)?.version;
+      return {
+        placeholder: `Encrypted for your encryption key${version ? ` v${version}` : ""}, which is not loaded`,
+      };
+    }
+    case "signature":
+      return {
+        placeholder: "Hidden: the signature check failed, so this message was changed or not signed by its sender",
+        warning: true,
+      };
+    case "damaged":
+      return { placeholder: "Damaged message: it cannot be decrypted", warning: true };
+    case "private-key":
+      return { placeholder: "Cannot decrypt: the loaded decryption key file is not valid" };
+    default:
+      return { placeholder: "This message could not be decrypted" };
+  }
+}
+
+// Re-renders only when something visible changed, so polling does not reset scrolling
+// or a text selection every three seconds.
+function renderMessages({ force = false } = {}) {
+  const view = [
+    state.relationship?.id,
+    state.messages.map((message) => message.id).join(","),
+    state.messageCacheVersion,
+    Boolean(state.encryptionPrivatePem),
+    state.keys.length,
+  ].join("|");
+  if (!force && view === state.messagesRendered) return;
+  state.messagesRendered = view;
+
   const wasNearBottom =
     chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 100;
   chatMessages.replaceChildren();
-  if (messages.length === 0) {
+  if (state.messages.length === 0) {
     const empty = document.createElement("p");
     empty.className = "chat-empty";
     empty.textContent = "No messages yet. Send a message to start the conversation.";
@@ -314,7 +380,7 @@ function renderMessages(messages) {
     return;
   }
 
-  for (const message of messages) {
+  for (const message of state.messages) {
     const own = message.sender_id === state.user.id;
     const row = document.createElement("article");
     row.className = `chat-row${own ? " own" : ""}`;
@@ -330,12 +396,149 @@ function renderMessages(messages) {
     time.textContent = date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
     meta.append(author, time);
     const body = document.createElement("div");
-    body.textContent = message.body;
+    const content = messageContent(message);
+    if (content.text !== undefined) {
+      body.textContent = content.text;
+      const verified = document.createElement("span");
+      verified.className = "chat-verified";
+      verified.textContent = "✓ Verified";
+      verified.title = "Decrypted in this browser; the sender's signature is valid.";
+      meta.append(verified);
+    } else {
+      body.className = `chat-placeholder${content.warning ? " warning" : ""}`;
+      body.textContent = content.placeholder;
+    }
     bubble.append(meta, body);
     row.append(bubble);
     chatMessages.append(row);
   }
   if (wasNearBottom) chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function chatKeyNotice() {
+  if (!state.relationship || !state.user) return null;
+  const counterpart = counterpartFor(state.relationship);
+  if (!latestKey(state.user.id, "signing") || !latestKey(state.user.id, "encryption")) {
+    return {
+      text: "Messages are end-to-end encrypted, like reports. Generate your keys in the Security keys tab to start chatting.",
+      action: true,
+    };
+  }
+  if (!latestKey(counterpart.id, "encryption")) {
+    return {
+      text: `Messages are end-to-end encrypted. You can send messages once ${counterpart.name} generates their keys.`,
+      action: false,
+    };
+  }
+  const needsSigning = !state.signingPrivatePem;
+  const needsDecryption = !state.encryptionPrivatePem;
+  if (needsSigning && needsDecryption) {
+    return {
+      text: "Messages are end-to-end encrypted. Load your signing and decryption private keys in the Security keys tab to send and read them.",
+      action: true,
+    };
+  }
+  if (needsDecryption) {
+    return { text: "Load your decryption private key in the Security keys tab to read messages.", action: true };
+  }
+  if (needsSigning) {
+    return { text: "Load your signing private key in the Security keys tab to send messages.", action: true };
+  }
+  if (state.messages.some((message) => state.messageText.get(message.id)?.error === "wrong-key")) {
+    return {
+      text: "Some messages were encrypted for another version of your encryption key. Load that version's private key file to read them.",
+      action: true,
+    };
+  }
+  return null;
+}
+
+function updateChatKeyNotice() {
+  const notice = chatKeyNotice();
+  document.querySelector("#chat-key-notice").hidden = !notice;
+  if (!notice) return;
+  document.querySelector("#chat-key-notice-text").textContent = notice.text;
+  document.querySelector("#chat-key-notice-open").hidden = !notice.action;
+}
+
+async function decryptMessage(message, privatePem) {
+  const signerKey = state.keys.find((key) => key.id === message.signing_key_id);
+  // The key list can lag one poll behind a new message; the next poll retries it.
+  if (!signerKey) return;
+  const own = message.sender_id === state.user.id;
+  state.decryptingMessages.add(message.id);
+  try {
+    const text = await cryptoRequest("decrypt-message", {
+      ciphertext: base64ToBytes(message.ciphertext_b64),
+      iv: base64ToBytes(message.iv_b64),
+      // Your own messages are opened through the copy of the DES key wrapped for you.
+      wrappedKey: base64ToBytes(own ? message.sender_wrapped_des_key_b64 : message.wrapped_des_key_b64),
+      privatePem,
+      signerPublicPem: signerKey.public_key_pem,
+    });
+    state.messageText.set(message.id, { text });
+  } catch (error) {
+    // A failure only counts for the key it was tried with: loading another key retries it.
+    if (error.code && state.encryptionPrivatePem === privatePem) {
+      state.messageText.set(message.id, { error: error.code });
+    }
+  } finally {
+    state.decryptingMessages.delete(message.id);
+  }
+}
+
+async function decryptMessages() {
+  const privatePem = state.encryptionPrivatePem;
+  const relationshipId = state.relationship?.id;
+  if (!privatePem || !relationshipId) return;
+  const waiting = state.messages.filter(
+    (message) => !state.messageText.has(message.id) && !state.decryptingMessages.has(message.id),
+  );
+  if (waiting.length === 0) return;
+  await Promise.all(waiting.map((message) => decryptMessage(message, privatePem)));
+  if (state.relationship?.id !== relationshipId) return;
+  state.messageCacheVersion += 1;
+  renderMessages();
+  updateChatKeyNotice();
+}
+
+function retryMessageDecryption() {
+  for (const [id, entry] of state.messageText) {
+    if ("error" in entry) state.messageText.delete(id);
+  }
+  state.messageCacheVersion += 1;
+  renderMessages();
+  updateChatKeyNotice();
+  decryptMessages();
+}
+
+async function sealMessage(text) {
+  if (!state.signingPrivatePem) {
+    throw new Error("Load your signing private key in the Security keys tab before sending messages.");
+  }
+  const counterpart = counterpartFor(state.relationship);
+  const recipientKey = latestKey(counterpart.id, "encryption");
+  const senderKey = latestKey(state.user.id, "encryption");
+  const signingKey = latestKey(state.user.id, "signing");
+  if (!senderKey || !signingKey) {
+    throw new Error("Generate your keys in the Security keys tab before sending messages.");
+  }
+  if (!recipientKey) {
+    throw new Error(`${counterpart.name} has not generated keys yet, so messages to them cannot be encrypted.`);
+  }
+  const sealed = await cryptoRequest("encrypt-message", {
+    text,
+    signingPrivatePem: state.signingPrivatePem,
+    signingPublicPem: signingKey.public_key_pem,
+    recipientPublicPem: recipientKey.public_key_pem,
+    senderPublicPem: senderKey.public_key_pem,
+  });
+  return {
+    ...sealed,
+    recipient_key_id: recipientKey.id,
+    sender_key_id: senderKey.id,
+    signing_key_id: signingKey.id,
+  };
 }
 
 async function refreshMessages(relationshipId) {
@@ -349,8 +552,11 @@ async function refreshMessages(relationshipId) {
     ]);
     if (state.relationship?.id !== relationshipId) return;
     setConnectionStatus(true);
-    hideInlineMessage("chat-message");
-    renderMessages(messages);
+    if (state.pollError) {
+      hideInlineMessage("chat-message");
+      state.pollError = false;
+    }
+    // Keys first: a new message may be signed with a key that arrived in this same poll.
     // Re-render only on change so in-progress buttons and key download links survive polling.
     const keysChanged =
       keys.map((key) => key.id).join(",") !== state.keys.map((key) => key.id).join(",");
@@ -358,6 +564,10 @@ async function refreshMessages(relationshipId) {
       state.keys = keys;
       renderKeys();
     }
+    state.messages = messages;
+    renderMessages();
+    updateChatKeyNotice();
+    decryptMessages();
     if (documentIds.join(",") !== state.documentIds) {
       const documents = await api(`${base}/documents`);
       if (state.relationship?.id === relationshipId) renderDocuments(documents);
@@ -377,11 +587,13 @@ async function refreshMessages(relationshipId) {
         }
       } catch (refreshError) {
         showInlineMessage("chat-message", refreshError.message);
+        state.pollError = true;
       }
     } else if (error instanceof ApiError && error.status === 401) {
       await stopWorkspace();
     } else {
       showInlineMessage("chat-message", error.message);
+      state.pollError = true;
     }
   }
 }
@@ -606,6 +818,7 @@ async function generateAndPublishKeys() {
     }
     state.keys = await api(path);
     renderKeys();
+    retryMessageDecryption();
     const downloads = document.createElement("div");
     downloads.className = "private-key-downloads";
     downloads.append(
@@ -615,7 +828,7 @@ async function generateAndPublishKeys() {
     keyList.prepend(downloads);
     showInlineMessage(
       "key-message",
-      "New public keys published. Download both private-key files now. You will need them to sign and decrypt reports. Protect them and keep a secure backup.",
+      "New public keys published. Download both private-key files now. You will need them to sign and decrypt reports and messages. Protect them and keep a secure backup.",
       true,
     );
   } catch (error) {
@@ -638,13 +851,8 @@ async function uploadDocument(file) {
     if (!state.signingPrivatePem) {
       throw new Error("Load your signing private key in the Security keys tab before sending a report.");
     }
-    const counterpart = counterpartFor(state.relationship);
-    const recipientKey = state.keys
-      .filter((key) => key.user_id === counterpart.id && key.purpose === "encryption")
-      .sort((a, b) => b.version - a.version)[0];
-    const signingKey = state.keys
-      .filter((key) => key.user_id === state.user.id && key.purpose === "signing")
-      .sort((a, b) => b.version - a.version)[0];
+    const recipientKey = latestKey(counterpartFor(state.relationship).id, "encryption");
+    const signingKey = latestKey(state.user.id, "signing");
     if (!recipientKey || !signingKey) {
       throw new Error("Both participants need published public keys before exchanging reports.");
     }
@@ -824,23 +1032,32 @@ chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.relationship) return;
   const button = document.querySelector("#send-button");
-  const body = chatInput.value.trim();
-  if (!body) return;
+  const text = chatInput.value.trim();
+  if (!text) return;
   hideInlineMessage("chat-message");
+  state.pollError = false;
   button.disabled = true;
+  const relationshipId = state.relationship.id;
   try {
-    await api(`/api/relationships/${state.relationship.id}/messages`, {
+    const sealed = await sealMessage(text);
+    const created = await api(`/api/relationships/${relationshipId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify(sealed),
     });
+    // The sender already knows the text, so their new message needs no decryption.
+    state.messageText.set(created.id, { text });
     chatInput.value = "";
-    await refreshMessages(state.relationship.id);
+    await refreshMessages(relationshipId);
   } catch (error) {
     showInlineMessage("chat-message", error.message);
   } finally {
     button.disabled = false;
     chatInput.focus();
   }
+});
+
+document.querySelector("#chat-key-notice-open").addEventListener("click", () => {
+  setActivePanel("keys-panel");
 });
 
 document.querySelector("#upload-document-button").addEventListener("click", () => {
@@ -918,6 +1135,7 @@ document.querySelector("#signing-private-key").addEventListener("change", async 
   try {
     state.signingPrivatePem = await file.text();
     showInlineMessage("key-message", "Signing private key loaded in this tab only.", true);
+    updateChatKeyNotice();
   } catch {
     showInlineMessage("key-message", "Could not read the selected signing key file.");
   }
@@ -929,6 +1147,7 @@ document.querySelector("#encryption-private-key").addEventListener("change", asy
   try {
     state.encryptionPrivatePem = await file.text();
     showInlineMessage("key-message", "Decryption private key loaded in this tab only.", true);
+    retryMessageDecryption();
   } catch {
     showInlineMessage("key-message", "Could not read the selected decryption key file.");
   }

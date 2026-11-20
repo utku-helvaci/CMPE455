@@ -1,22 +1,23 @@
 # STMA
 
-Summer Training Management Application: a Python API for student–evaluator chat and exchange of signed, DES-encrypted reports. The server stores encrypted document bytes; clients retain their private RSA keys.
+Summer Training Management Application: a Python API for student–evaluator chat and report exchange. Chat messages and reports are signed and DES-encrypted in the browser; the server stores only ciphertext, and clients keep their private RSA keys.
 
 ## Current implementation
 
-- A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
+- A responsive sign-in page and role-aware workspace are served at `/`. Students and evaluators can use assigned conversations, exchange signed DES-encrypted chat messages, manage RSA public keys, and send/receive signed DES-encrypted reports. Sysadmins see operational health counts only.
 - Students and teachers can register with their name, surname, school ID, and password. New accounts remain pending until a Sysadmin assigns the student or evaluator role from the admin workspace; pending users cannot sign in. Existing account roles are preserved. Student and evaluator school IDs are also their login names; Sysadmins can use a separate username.
 - Teachers add students by entering the exact school ID, without browsing a directory. Teachers can end a relationship; this removes active access but retains the old messages and encrypted files. Re-adding the same student restores that relationship and its history.
 - Sysadmins can permanently delete a student or evaluator account from the admin workspace. This also removes the account's relationships, messages, public keys, report records, and stored encrypted report files; the action cannot be undone. Sysadmin accounts are not exposed in the user list.
 - Existing SQLite databases are updated at startup to add the new student profile columns; existing accounts remain in place.
+- Upgrading a database from before chat was encrypted removes its old chat messages. They were stored as readable text and cannot be converted: signing a message needs the sender's private key, which the server never has. Accounts, relationships, keys and reports are kept.
 - FastAPI and Uvicorn provide the HTTP API.
 - PostgreSQL is the intended shared database. SQLite is the local-development default.
 - SQLAlchemy manages database records.
 - Argon2id hashes account passwords; login tokens are random, expire after 12 hours, and are stored only as SHA-256 digests.
-- Client-side document processing uses RSA-PSS/SHA-256 signatures, DES-CBC with PKCS#7 padding, and RSA-OAEP/SHA-256 to protect the DES key. There is no HMAC or second document cipher.
+- Client-side processing of reports and chat messages uses RSA-PSS/SHA-256 signatures, DES-CBC with PKCS#7 padding, and RSA-OAEP/SHA-256 to protect the DES key. There is no HMAC or second cipher.
 - The recipient verifies the signature after decryption. A failed decryption or signature check is an error, not a successful receipt.
 - Clients can generate 3072-bit RSA key pairs with `stma.crypto.generate_rsa_key_pair()`. Publish only the public key, keep private keys on the client computer, and restrict local access to their files.
-- Chat is sent over HTTPS when deployed behind TLS and the workspace refreshes messages every three seconds. Messages are stored as plaintext in PostgreSQL, so they are not end-to-end encrypted.
+- Chat messages use the same scheme as reports, so they are end-to-end encrypted: each message is signed and encrypted in the browser with a fresh DES key, and that key is wrapped with RSA twice, once for the recipient and once for the sender, so both can read the conversation later. The database stores only ciphertext. The workspace checks for new messages every three seconds; reading and sending them needs the private key files loaded in the **Security keys** tab, and decrypted text is kept only in that browser tab's memory until sign-out.
 - Sysadmin health endpoints expose service counts, not chat or document contents. Database administrators can still access database records; restrict database credentials accordingly.
 
 DES is used because the course assignment requires it. DES has a short effective key and is not appropriate for real sensitive documents.
@@ -150,6 +151,8 @@ This creates `encrypted-export/<date_time>/` in the project folder with:
 
 The script also prints the first 32 bytes of each file. Nothing is decrypted: opening an exported file in a text editor shows unreadable bytes, and only the recipient can read the report, through the app, with their private key. `encrypted-export/` is ignored by Git.
 
+Chat messages are stored the same way, but inside the database: open the `chat_messages` table in HeidiSQL and the `ciphertext` column holds unreadable bytes.
+
 To look inside the container directly instead, for example during a live demo:
 
 ```sh
@@ -166,7 +169,7 @@ docker compose --env-file .env.docker exec app od -c -N 64 /app/storage/<stored 
 5. Each participant generates separate signing and encryption RSA key pairs locally and publishes the public keys to `POST /api/relationships/{id}/keys`. Verify key fingerprints out of band before relying on them.
 6. The sender signs and encrypts the report locally, wraps the DES key for the recipient, then sends the ciphertext and key references to `POST /api/relationships/{id}/documents`.
 7. The recipient downloads the encrypted package from `GET /api/relationships/{id}/documents`, unwraps the DES key locally, decrypts the report, and verifies its signature with the sender's signing public key.
-8. Participants send and read chat messages at the relationship's `/messages` endpoints. Delivery is confirmed by the API response.
+8. Participants exchange chat messages through the relationship's `/messages` endpoints. Like a report, each message is signed and encrypted in the sender's browser; its DES key is wrapped for the recipient and for the sender, and each participant decrypts it and verifies the signature with their own keys.
 9. A Sysadmin checks `GET /api/admin/health`.
 
 The workspace provides SHA-256 public-key fingerprints for users to compare through a trusted channel. Participants manually rotate their RSA keys every 90 days. Each newly published key gets a higher version, and older public-key versions remain available so archived exchanges can identify the corresponding recipient private key. The server does not enforce the schedule or revoke compromised keys. Key backup and compromise/revocation procedures remain manual.
@@ -178,3 +181,5 @@ Install `requirements-dev.txt` as described under Local development, then run:
 ```sh
 pytest
 ```
+
+`tests/test_browser_crypto.py` runs the browser's encryption code under Node.js to check that it and the Python reference in `stma/crypto.py` can open each other's messages and reports. It is skipped when Node.js is not installed.
